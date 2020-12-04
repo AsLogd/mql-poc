@@ -1,0 +1,4 @@
+define hitter:player hits rec:player with att:attack =
+	$hitter performs $att and $rec receives $att
+
+matches where "aslo" hits "eibol" with "fair"

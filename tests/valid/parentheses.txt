@@ -1,1 +1,1 @@
-matches where (someone is "Falco" or someone is "Fox") and someone is "Ganondorf"
+matches where ( someone is "Falco" or someone is "Fox" ) and someone is "Ganondorf"

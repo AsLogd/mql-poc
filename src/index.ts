@@ -3,6 +3,42 @@ import Nearley from "nearley"
 //@ts-ignore
 import grammar from "./grammar"
 
-const parser = new Nearley.Parser(
-	Nearley.Grammar.fromCompiled(grammar)
-)
+
+import {
+	Failable,
+	Failure,
+	Success
+} from "./Failable"
+
+export * as Failable 	from "./Failable"
+
+function executeParser(text: string): Failable<any, any> {
+	const parser = new Nearley.Parser(
+		Nearley.Grammar.fromCompiled(grammar)
+	)
+
+	try {
+		parser.feed(text)
+	} catch (err) {
+		return Failure({reason: err})
+	}
+
+	if (parser.results.length < 1) {
+		return Failure({reason: "Invalid Chart file"})
+	} else if(parser.results.length > 1) {
+		console.warn("mql: Ambiguous input")
+	}
+
+	return Success(parser.results[0])
+}
+
+export default class Parser {
+	static parse(text: string): Failable<any, any> {
+		const parseResult = executeParser(text)
+		if (!parseResult.ok) {
+			return parseResult
+		}
+
+		return Success(parseResult.value)
+	}
+}

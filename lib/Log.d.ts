@@ -4,4 +4,5 @@ export default class Log {
     static warn(msg: string): void;
     static error(msg: string): void;
     static dump(obj: any): void;
+    static printAST(obj: any[]): void;
 }

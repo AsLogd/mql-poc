@@ -19,6 +19,8 @@ const keywords = [
 	"character",
 	"attack"
 ]
+
+//TOOD: something happens when reading tabs from stdin
 const keywordsMap = Object.fromEntries(
 	keywords.map(k => [k, k])
 )
@@ -40,16 +42,16 @@ let lexer = moo.compile({
 
 const identity		= (a)			     	=> a
 const takeFirst		= ([a])					=> a
-const query 		= ([target, _, expr])	=> ({target, expr})
-const infix 		= ([lval, op, rval]) 	=> ({op, lval, rval})
-const prefix 		= ([operator, rval]) 	=> ({operator, rval})
 const removeFirst   = ([_, a]) 				=> a
 const removeTwo		= ([_, __, a]) 			=> a
 const catWithRest 	= ([r, i])				=> [...(r||[]), i]
 const removeSecond 	= ([a, _, b])			=> [a, b]
 const removeSecondAndCat 	= ([a, _, b])	=> [...(a||[]), b]
+const query 		= ([target, _, expr])	=> ({type: "query",target, expr})
+const infix 		= ([lval, op, rval]) 	=> ({type: "infix", op, lval, rval})
+const prefix 		= ([op, rval])		 	=> ({type: "prefix", op, rval})
 const paramRef 		= ([_, name])			=> ({type: "ref", name})
-const definition 	= ([_, __, sign, ___, body])	=> ({type: "definition", signature: sign, body})
+const definition 	= ([_, __, s, ___, b])	=> ({type: "definition", signature: s, body: b})
 const func 			= ([name, _, params])	=> ({type: "function", name, params})
 const funcDef 		= ([_, __, head, body]) => ({type: "function_def", head, body})
 const funcHeader 	= ([name, _, params]) 	=> ({type: "function_head", name, params}) 
@@ -57,7 +59,7 @@ const funcHeader 	= ([name, _, params]) 	=> ({type: "function_head", name, param
 
 @lexer lexer
 
-start	-> _ statement:+					{% identity %}
+start	-> _ statement:+					{% removeFirst %}
 statement ->	
 	  definition _ 							{% takeFirst %}
 	| js_block _ 							{% takeFirst %}
@@ -75,7 +77,6 @@ signature ->
 	| %literal __ param_def 				{% removeSecond %}
 
 param_def -> %literal %co type				{% infix %}
-param_ref -> %dol %literal					{% paramRef %}
 
 body -> %eq _ expression					{% removeTwo %}
 
@@ -87,8 +88,8 @@ expression ->
 	| not expression _						{% prefix %}
 	| term _								{% takeFirst %}
 term ->
-	sentence								{% identity %}
-	| function_call							{% identity %}
+	sentence								{% takeFirst %}
+	| function_call							{% takeFirst %}
 	| %lp _ expression _ %rp				{% removeTwo %}
 
 function_call ->
@@ -111,6 +112,7 @@ and			 -> __ %and __					{% removeFirst %}
 or			 -> __ %or __					{% removeFirst %}
 where		 -> __ %where __				{% removeFirst %}
 
+param_ref -> %dol %literal					{% paramRef %}
 subject		 -> 
 	%someone 								{% takeFirst %}
 	| %match 								{% takeFirst %}
@@ -123,7 +125,7 @@ type ->
 	| %character							{% takeFirst %}
 	| %attack								{% takeFirst %}
 
-target		 -> %matches
+target		 -> %matches					{% identity %}
 
 __ 			 -> %ws 						{% null %}
-_  			 -> %ws:*						{% null %}
+_  			 -> %ws:?						{% null %}

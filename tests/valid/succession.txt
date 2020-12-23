@@ -1,0 +1,3 @@
+matches where someone is "Falcon" and someone is "Fox"
+	then "falcon" does "falcon punch" before "falcon" dies
+	then "fox" dies before "fox" hits "falcon" 

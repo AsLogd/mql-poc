@@ -10,7 +10,8 @@ const keywords = [
 	"or",
 	"not",
 	"define",
-	"fn",
+	"then",
+	"before",
 	// Subjects
 	"someone",
 	// Types
@@ -47,7 +48,9 @@ const removeTwo		= ([_, __, a]) 			=> a
 const catWithRest 	= ([r, i])				=> [...(r||[]), i]
 const removeSecond 	= ([a, _, b])			=> [a, b]
 const removeSecondAndCat 	= ([a, _, b])	=> [...(a||[]), b]
-const query 		= ([target, _, expr])	=> ({type: "query",target, expr})
+const query 		= ([target, _, succ])	=> ({type: "query",target, succession: succ})
+const succession 	= ([expr, succ])		=> ([expr, ...succ])
+const temporal 		= ([_, then, __, bfr])	=> ({type: "temporal", then, before: bfr})
 const infix 		= ([lval, op, rval]) 	=> ({type: "infix", op, lval, rval})
 const prefix 		= ([op, rval])		 	=> ({type: "prefix", op, rval})
 const paramRef 		= ([_, name])			=> ({type: "ref", name})
@@ -78,10 +81,15 @@ signature ->
 
 param_def -> %literal %co type				{% infix %}
 
-body -> %eq _ expression					{% removeTwo %}
+body -> %eq _ succession					{% removeTwo %}
 
 
-query 	-> target where expression			{% query %}
+query 	-> target where succession			{% query %}
+
+succession -> expression:? temporal:* 		{% succession %}
+temporal -> then expression before_expr:? 	{% temporal %}
+before_expr -> before expression 			{% removeFirst %}
+
 expression -> 
 	  expression and term _					{% infix %}
 	| expression or term _					{% infix %}
@@ -111,6 +119,8 @@ not			 -> __ %not __					{% removeFirst %}
 and			 -> __ %and __					{% removeFirst %}
 or			 -> __ %or __					{% removeFirst %}
 where		 -> __ %where __				{% removeFirst %}
+then		 -> __ %then __					{% removeFirst %}
+before		 -> __ %before __				{% removeFirst %}
 
 param_ref -> %dol %literal					{% paramRef %}
 subject		 -> 

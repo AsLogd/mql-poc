@@ -1,0 +1,7 @@
+[37m Query: [0m
+[37m test [0m
+[37m Content: [0m
+[37m matches where someone is "Falcon" and someone is "Fox"
+	then "falcon" jumps
+	then "fox" jumps before "falcon" is grounded [0m
+[37m m [0m

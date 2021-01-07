@@ -49,80 +49,104 @@ export default class Log {
 		}
 		function printBody(body: any) {
 			console.log(`|--Body:`)
-			printExpression(body, 0)
+			printSuccession(body, 0)
 		}
 		function printFunctionParams(params: any[], level: number) {
+			const ind = '-'.repeat(level)
 			params.forEach((p) => {
 				switch (p.type) {
 					case "string":
-						console.log(`|----${'-'.repeat(level)}String: ${p.value}`)
+						console.log(`|----${ind}String: ${p.value}`)
 						break;
 					case "literal":
-						console.log(`|----${'-'.repeat(level)}Literal: ${p.value}`)
+						console.log(`|----${ind}Literal: ${p.value}`)
 						break;
 					case "number":
-						console.log(`|----${'-'.repeat(level)}Number: ${p.value}`)
+						console.log(`|----${ind}Number: ${p.value}`)
 						break;
 					case "ref":
-						console.log(`|----${'-'.repeat(level)}Ref: ${p.name.value}`)
+						console.log(`|----${ind}Ref: ${p.name.value}`)
 						break;
 				}
 			})
 		}
 		function printTerm(term: any, level: number) {
+			const ind = '-'.repeat(level)
 			if(Array.isArray(term)) {
 				term.forEach((t) => {
 					switch (t.type) {
 						case "ref":
-							console.log(`|----${'-'.repeat(level)}Ref: ${t.name.value}`)
+							console.log(`|----${ind}Ref: ${t.name.value}`)
 							break;
 						default:
-							console.log(`|----${'-'.repeat(level)}${t.type}: ${t.value}`)
+							console.log(`|----${ind}${t.type}: ${t.value}`)
 							break;
 					}
 				})
 			} else {
 				switch (term.type) {
 					case "function":
-						console.log(`|----${'-'.repeat(level)}Function call:`)
-						console.log(`|-----${'-'.repeat(level)}Name:`, term.name.value)
-						console.log(`|-----${'-'.repeat(level)}Params:`)
+						console.log(`|----${ind}Function call:`)
+						console.log(`|-----${ind}Name:`, term.name.value)
+						console.log(`|-----${ind}Params:`)
 						printFunctionParams(term.params, level+2)
 						break;
 					
 					default:
-						console.log(`|----${'-'.repeat(level)}Expression:`)
+						console.log(`|----${ind}Expression:`)
 						printExpression(term, level+2)
 						break;
 				}
 			}
 		}
 		function printExpression(expr: any, level: number) {
+			const ind = '-'.repeat(level)
 			switch (expr.type) {
 				case "infix":
-					console.log(`|---${'-'.repeat(level)}Infix: ${expr.op}`)
-					console.log(`|----${'-'.repeat(level)}Lval:`)
+					console.log(`|---${ind}Infix: ${expr.op}`)
+					console.log(`|----${ind}Lval:`)
 					printExpression(expr.lval, level+2)
-					console.log(`|----${'-'.repeat(level)}Rval:`)
+					console.log(`|----${ind}Rval:`)
 					printExpression(expr.rval, level+2)
 					break;
 				case "prefix":
-					console.log(`|---${'-'.repeat(level)}Prefix: ${expr.op}`)
-					console.log(`|----${'-'.repeat(level)}Rval:`)
+					console.log(`|---${ind}Prefix: ${expr.op}`)
+					console.log(`|----${ind}Rval:`)
 					printExpression(expr.rval, level+2)
 					break;
 				default:
-					console.log(`|---${'-'.repeat(level)}Term:`)
+					console.log(`|---${ind}Term:`)
 					printTerm(expr, level+1)
 					break;
 			}
+		}
+
+		function printTemporal(temporal: any, level: number) {
+			const ind = '-'.repeat(level)
+			console.info(`|---${ind}${temporal.type}`)
+			console.info(`|----${ind}Then:`)
+			printExpression(temporal.then, level+2)
+			if(!temporal.before)
+				return
+			console.info(`|----${ind}Before:`)
+			printExpression(temporal.before, level+2)
+		}
+
+		function printSuccession(succ: any, level:number) {
+			const ind = '-'.repeat(level)
+			console.info(`|--${ind}${succ.type}`)
+			printExpression(succ.expression, level+1)
+			for (const t of succ.temporals) {
+				printTemporal(t, level)
+			}			
+			
 		}
 		function printStatement(obj: any) {
 			console.info(`|-${obj.type}`)
 			switch (obj.type) {
 				case "query":
 					printTarget(obj.target)
-					printExpression(obj.expr, 0)
+					printSuccession(obj.succession, 0)
 					break;
 				
 				case "definition":
@@ -130,7 +154,7 @@ export default class Log {
 					printSignature(signature)
 					printBody(body)
 					break;
-				case "js":
+				case "JS":
 					console.log("|--JS block:")
 					console.log(obj.text)
 					break;

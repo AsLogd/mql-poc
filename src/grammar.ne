@@ -10,15 +10,16 @@ const keywords = [
 	"or",
 	"not",
 	"define",
+	"js",
+	"function",
 	"then",
 	"before",
 	// Subjects
 	"someone",
 	// Types
-	"match",
 	"player",
 	"character",
-	"attack"
+	"attack",
 ]
 
 //TOOD: something happens when reading tabs from stdin
@@ -28,9 +29,10 @@ const keywordsMap = Object.fromEntries(
 
 let lexer = moo.compile({
 	ws: 		{match: /[ \t\n\r]+/, lineBreaks: true},
-	js: 		{match: /js\{[^]*\}/, lineBreaks: true},
+	block: 		{match: /\{[^]*\}/, lineBreaks: true},
 	string: 	/"(?:\\["bfnrt\/\\]|\\u[a-fA-F0-9]{4}|[^"\\])*"/,
 	literal: 	{match: /[a-zA-Z_]+/, type: moo.keywords(keywordsMap)},
+	port:		/p[1-4]/,
 	number: 	/[0-9]+(?:\.[0-9]+)?/,
 	lp:			"(",
 	rp:			")",
@@ -41,20 +43,25 @@ let lexer = moo.compile({
 
 })
 
+//TODO: refactor
 const identity		= (a)			     	=> a
 const takeFirst		= ([a])					=> a
 const removeFirst   = ([_, a]) 				=> a
 const removeTwo		= ([_, __, a]) 			=> a
+const takeNth 		= (n) => (vals)			=> vals[n]
 const catWithRest 	= ([r, i])				=> [...(r||[]), i]
 const removeSecond 	= ([a, _, b])			=> [a, b]
 const removeSecondAndCat 	= ([a, _, b])	=> [...(a||[]), b]
 const query 		= ([target, _, succ])	=> ({type: "query",target, succession: succ})
-const succession 	= ([expr, succ])		=> ([expr, ...succ])
-const temporal 		= ([_, then, __, bfr])	=> ({type: "temporal", then, before: bfr})
+const succession 	= ([expr, succ])		=> ({type: "succession", expression: expr, temporals: succ})
+const temporal 		= ([_, then, before])	=> ({type: "temporal", then, before})
+const specialTemporal = ([then, before])	=> ({type: "temporal", then, before})
 const infix 		= ([lval, op, rval]) 	=> ({type: "infix", op, lval, rval})
 const prefix 		= ([op, rval])		 	=> ({type: "prefix", op, rval})
+const sentence 		= ([val])				=> ({type: "sentence", val})
 const paramRef 		= ([_, name])			=> ({type: "ref", name})
 const definition 	= ([_, __, s, ___, b])	=> ({type: "definition", signature: s, body: b})
+const js_func 		= ([name, params, body])=> ({type: "js_func", name, params, body: body.slice(1, -1)})
 const func 			= ([name, _, params])	=> ({type: "function", name, params})
 const funcDef 		= ([_, __, head, body]) => ({type: "function_def", head, body})
 const funcHeader 	= ([name, _, params]) 	=> ({type: "function_head", name, params}) 
@@ -65,11 +72,15 @@ const funcHeader 	= ([name, _, params]) 	=> ({type: "function_head", name, param
 start	-> _ statement:+					{% removeFirst %}
 statement ->	
 	  definition _ 							{% takeFirst %}
-	| js_block _ 							{% takeFirst %}
+	| js_func _ 							{% takeFirst %}
 	| query _ 								{% takeFirst %}
 
-js_block -> %js 							{% takeFirst %}
-
+js_func -> js_header js_params js_body		{% js_func %}
+js_header -> %js __ %function __ %literal	{% takeNth(4) %}
+js_params -> %lp _ js_plist:? _ %rp			{% takeNth(2) %}
+js_plist -> js_plist (%comma _) %literal	{% removeSecond %}
+	| %literal								{% takeFirst %}
+js_body -> %block							{% takeFirst %}
 
 definition -> 
 	%define __ signature __ body 			{% definition %}
@@ -86,8 +97,9 @@ body -> %eq _ succession					{% removeTwo %}
 
 query 	-> target where succession			{% query %}
 
-succession -> expression:? temporal:* 		{% succession %}
+succession -> special_temporal temporal:* 	{% succession %}
 temporal -> then expression before_expr:? 	{% temporal %}
+special_temporal-> expression before_expr:? {% specialTemporal %}
 before_expr -> before expression 			{% removeFirst %}
 
 expression -> 
@@ -96,7 +108,7 @@ expression ->
 	| not expression _						{% prefix %}
 	| term _								{% takeFirst %}
 term ->
-	sentence								{% takeFirst %}
+	sentence								{% sentence %}
 	| function_call							{% takeFirst %}
 	| %lp _ expression _ %rp				{% removeTwo %}
 
@@ -125,13 +137,12 @@ before		 -> __ %before __				{% removeFirst %}
 param_ref -> %dol %literal					{% paramRef %}
 subject		 -> 
 	%someone 								{% takeFirst %}
-	| %match 								{% takeFirst %}
 	| %string								{% takeFirst %}
 	| %number								{% takeFirst %}
+	| %port									{% takeFirst %}
 	| param_ref								{% takeFirst %}
 type ->
-	  %match								{% takeFirst %}
-	| %player								{% takeFirst %}
+	 %player								{% takeFirst %}
 	| %character							{% takeFirst %}
 	| %attack								{% takeFirst %}
 

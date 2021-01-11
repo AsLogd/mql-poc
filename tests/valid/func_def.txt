@@ -1,8 +1,0 @@
-js{
-	const test_func = (a, b, c) => {
-		// Calls to slippi-js
-		return true
-	}
-}
-
-matches where "aslo" is "falcon" and test_func("aslo", "falcon", 10)

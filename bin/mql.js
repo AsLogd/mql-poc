@@ -1,4 +1,70 @@
 #! /usr/bin/env node
+// Index === attack id
+// Values in second dimension are aliases for that attack
+const attackNames = [
+	["none"],
+	["non staling"],
+	["jab 1"],
+	["jab 2"],
+	["jab 3"],
+	["rapid jabs"],
+	["dash attack"],
+	["side tilt"],
+	["up tilt"],
+	["down tilt"],
+	["side smash"],
+	["up smash"],
+	["down smash"],
+	["nair"],
+	["fair"],
+	["bair"],
+	["uair"],
+	["dair"],
+	["neutral special"],
+	["side special"],
+	["up special"],
+	["down special"],
+]
+
+// Index === character id
+// Values in second dimension are aliases for that character
+const characterNames = [
+	["mario"],
+	["fox"],
+	["captain falcon", "falcon", "capt falcon"],
+	["donkey kong", "dk"],
+	["kirby"],
+	["bowser"],
+	["link"],
+	["sheik"],
+	["ness"],
+	["peach"],
+	["popo", "ice climbers"],
+	["nana"],
+	["pikachu"],
+	["samus"],
+	["yoshi"],
+	["jigglypuff"],
+	["mewtwo"],
+	["luigi"],
+	["marth"],
+	["zelda"],
+	["young link"],
+	["dr mario"],
+	["falco"],
+	["pichu"],
+	["mr game & watch", "game & watch", "game and watch", "mr game and watch", "g&w"],
+	["ganondorf", "ganon"],
+	["roy"],
+	["master hand"],
+	["crazy hand"],
+	["wireframe male"],
+	["wireframe female"],
+	["giga bowser"],
+	["sandbag"],
+]
+
+const util = require('util')
 const fs = require("fs")
 const path = require("path")
 const glob = require("glob")
@@ -55,80 +121,23 @@ query_result.forEach((m) => {
 	Log.info(`-${m}`)
 })
 
-// Index === attack id
-// Values in second dimension are aliases for that attack
-const attackNames = [
-	["none"],
-	["non staling"],
-	["jab 1"],
-	["jab 2"],
-	["jab 3"],
-	["rapid jabs"],
-	["dash attack"],
-	["side tilt"],
-	["up tilt"],
-	["down tilt"],
-	["side smash"],
-	["up smash"],
-	["down smash"],
-	["nair"],
-	["fair"],
-	["bair"],
-	["uair"],
-	["dair"],
-	["neutral special"],
-	["side special"],
-	["up special"],
-	["down special"],
-]
 
-// Index === character id
-// Values in second dimension are aliases for that character
-const characterNames = [
-	["captain falcon", "falcon", "capt falcon"],
-	["donkey kong", "dk"],
-	["fox"],
-	["mr game & watch", "game & watch", "game and watch", "mr game and watch", "g&w"],
-	["kirby"],
-	["bowser"],
-	["link"],
-	["luigi"],
-	["mario"],
-	["marth"],
-	["mewtwo"],
-	["ness"],
-	["peach"],
-	["pikachu"],
-	["ice climbers", "climbers"],
-	["jigglypuff"],
-	["samus"],
-	["yoshi"],
-	["zelda"],
-	["sheik"],
-	["falco"],
-	["young link"],
-	["dr mario"],
-	["roy"],
-	["pichu"],
-	["ganondorf", "ganon"],
-	["master hand"],
-	["wireframe male"],
-	["wireframe female"],
-	["giga bowser"],
-	["crazy hand"],
-	["sandbag"],
-]
 
 function characterIdFromName(name) {
-	characterNames.findIndex((tuple) => 
+	const index = characterNames.findIndex((tuple) => 
 		tuple.some(x => x === name)
 	)
+
+	return index !== -1 ? index : undefined
 }
 
 function attackIdFromName(name) {
-	attackNames.findIndex((tuple) => 
+	const index = attackNames.findIndex((tuple) => 
 		tuple.some(x => x === name)
 	)
+
+	return index !== -1 ? index : undefined
+
 }
 
 function getCurrentCharacters(id, frame, data) {
@@ -150,7 +159,8 @@ function getPlayerFromName(name, frame, data) {
 }
 
 function getAttack(name) {
-	return {
+	const id = attackIdFromName(name)
+	return id && {
 		type: "attack",
 		id: attackIdFromName(name)
 	}
@@ -168,29 +178,38 @@ function getPlayer(id, frame, data) {
 // Gets the pre and post of a character the characters called <name>
 // NOTE: this only gets the first matched character, this doesn't work for dittos
 function getCharacter(name, frame, data) {
-	return frame.players.find(p => 
+	//console.log("get", name, " with id ", characterIdFromName(name))
+	//console.log("available ids", frame.players.map(p => p.post.internalCharacterId))
+	const character = frame.players.find(p => 
 		p.post.internalCharacterId === characterIdFromName(name)
 	) 
+	return character && {
+		type:"character",
+		character
+	}
 }
 
 function parseValue(value, frame, data) {
+
 	switch(value.type) {
 		case "someone":
 			return "someone"
 		case "match":
 			return data.settings
-		case "string":
-			const val = getCharacters(value.text, frame, data) 
-				|| getAttack(value.text)
-				|| getPlayerFromName(value.text, frame, data)
+		case "string": {
+			const content = value.text.slice(1, -1).toLowerCase()
+			const val = getCharacter(content, frame, data) 
+				|| getAttack(content)
+				|| getPlayerFromName(content, frame, data)
+			//character or player not found on this replay or unrecognized string
 			if (!val) {
-				console.error("Unrecognized string: ", value.text)
-				return "error"
+				return "unknown"
 			}
 			return val
+		}
 		case "number":
 			return Number.parseFloat(value.text)
-		case "port":
+		case "port": {
 			const portNumber = parseInt(val.slice(1))
 			const val = getPlayer(portNumber)
 			if (!val) {
@@ -198,22 +217,25 @@ function parseValue(value, frame, data) {
 				return "error"
 			}
 			return {type:"port", portNumber, player: val}
-		case "ref":
+		}
+		case "ref": {
 			if(data.scope.length === 0) {
 				console.error("Undefined reference: ", value.name.text)
 				return "error"
 			}
 			const scope = data.scope[data.scope.length - 1]
-			if(!scope[ref.name.text]) {
+
+			if(!scope[value.name.text]) {
 				console.error("Undefined reference: ", value.name.text)
 				return "error"
 			}
-			return data.scope[value.name.text]
+			return scope[value.name.text]
+		}
 	}
 }
 
-function processParameters(params, data) {
-	params.map(parseValue, data)
+function processParameters(params, frame, data) {
+	return params.map(p => parseValue(p, frame, data))
 }
 
 function scopeFromParams(names, values) {
@@ -224,9 +246,9 @@ function scopeFromParams(names, values) {
 	return scope
 }
 
-function checkExpressionForFrame(expr, frome, data) {
+function checkExpressionForFrame(expr, frame, data) {
 	switch(expr.type) {
-		case "infix": 
+		case "infix": {
 			let res = false 
 			if(expr.type.op == "or") {
 				res = checkExpressionForFrame(expr.lval, frame, data)
@@ -236,16 +258,18 @@ function checkExpressionForFrame(expr, frome, data) {
 					&& checkExpressionForFrame(expr.rval, frame, data)
 			}
 			return res
+		}
 		case "prefix":
 			// Only not for now
 			return !checkExpressionForFrame(expr.rval, frame, data)
-		case "function":
+		case "function":{
 			if(data.functions[expr.name]) {
-				return !!data.functions[expr.name](...processParameters(expr.params, data))
+				return !!data.functions[expr.name](...processParameters(expr.params, frame, data))
 			}
 			console.error(`Function ${expr.name} is undefined`)
 			return false
-		case "sentence":
+		}
+		case "sentence": {
 			const signature = []
 			const params = []
 			for (const word of expr.val) {
@@ -253,19 +277,26 @@ function checkExpressionForFrame(expr, frome, data) {
 					signature.push(word.text)
 				} else {
 					const val = parseValue(word, frame, data)
-					signature.push(val.type)
+					if (val === "unknown") {
+						return false
+					}
+					signature.push(val.type || val)
 					params.push(val)
 				}
 			}
 			const definition = data.definitions[signature.join("_")]
+			//console.log("defs",data.definitions)
+			//console.log("searching signature", signature.join("_"))
+			//console.log("found", definition)
 			const scope = scopeFromParams(
 				definition.parameters,
 				params
 			)
 			data.scope.push(scope)
-			res = checkExpressionForFrame(definition.machine, frame, data)
+			const res = definition.machine.feedFrame(frame, data)
 			data.scope.pop()
 			return res
+		}
 	}
 }
 
@@ -274,53 +305,82 @@ function expressionFactory(expression, data) {
 	let obj = {
 		root: expression
 	}
-	obj.checkFrame = (frame) => {
-		checkExpressionForFrame(obj.root, frame, data)
+	obj.checkFrame = (frame, data) => {
+		return checkExpressionForFrame(obj.root, frame, data)
 	}
+	return obj
 }
 
 function temporalFactory(temporal, data) {
 	return {
 		then: expressionFactory(temporal.then, data),
-		before: expressionFactory(temporal.before, data)
+		before: temporal.before && expressionFactory(temporal.before, data)
 	}
 }
 
-function machineFactory(succession, data) {
+function machineFactory(succession, data, name) {
 	const machine = {
-		temporals: succession.map((t) => temporalFactory(t, data)),
+		temporals: succession.temporals.map((t) => temporalFactory(t, data)),
 		matched_at: [],
 		currentStep: 0,
+		name
 	}
 	// returns true if there's a match of the last temporal on that frame
-	machine.feedFrame = (frame) => {
+	machine.feedFrame = (frame, data) => {
 		const thenExpr = machine.temporals[machine.currentStep].then
 		const beforeExpr = machine.temporals[machine.currentStep].before
+		if(beforeExpr && beforeExpr.checkFrame(frame, data)) {
+			//console.log("<", name,">", "machine has triggered 'before' at frame", frame.frame)
+			machine.currentStep = 0
+		}
 		if(thenExpr.checkFrame(frame, data)) {
+			//console.log("<", name,">", "machine is advancing to step", machine.currentStep+1, " at frame", frame.frame)
+
 			machine.currentStep += 1
 			if(machine.currentStep === machine.temporals.length) {
+				//console.log("and its a match")
+
+				machine.matched_at.push(frame.frame)
+				machine.currentStep = 0
 				return true
 			}
-		}
-		if(beforeExpr.checkFrame(frame, data)) {
-			machine.currentStep = 0
 		}
 
 		return false
 	}
+
 	return machine
 }
 
-function checkFile(data) {
+function getFirstOccurrence(data) {
 	return (file) => {
+		//console.log("file", file)
 		const game = new SlippiGame(file)
 		const frames = game.getFrames()
+		const frameKeys = Object.keys(frames).map(f => parseInt(f)).sort((a, b) => a-b)
 		const rootMachine = machineFactory(
 			data.query.succession, 
 			// all checks inherit this data
-			{game, definitions: data.definitions}
+			{game, ...data},
+			"root"
 		)
-		return frames.some(rootMachine.feedFrame)
+		const frame = frameKeys.find(f => rootMachine.feedFrame(frames[f], {game, ...data}))
+		/*		
+		for(let i = 70; i < 135; i++){
+			console.log("------",i,"------")
+			console.log("-Falco")
+			console.log({
+				airborne: frames[i].players[0].post.isAirborne,
+				state: frames[i].players[0].post.actionStateId
+			})
+			console.log("-Ganon")
+			console.log({
+				airborne: frames[i].players[1].post.isAirborne,
+				state: frames[i].players[1].post.actionStateId
+			})
+		}*/
+				
+		return frame || -1
 	}
 }
 function executeQuery(data) {
@@ -330,8 +390,10 @@ function executeQuery(data) {
 		Log.info(`No files found at ${args.path}`)
 		return []
 	}
-	const check = checkFile(data.query.succession, data)
-	return files.filter(check)
+	const gfo = getFirstOccurrence(data)
+	return files.map(f => ({f, o: gfo(f)}))
+		.filter(tuple => tuple.o >= 0)
+		.map(tuple => `found occurrence in ${tuple.f} at frame ${tuple.o}`)
 }
 
 function evaluateDefinition(definition, data) {
@@ -344,39 +406,42 @@ function evaluateDefinition(definition, data) {
 			case "literal":
 				return `${pre}_${curr.value}`
 			default:
-				return `error`
+				return `_error`
 				console.error("Unknown token:", curr)
 		}
-	})
+	},"").slice(1)
 	data.definitions[signature] = {
-		machine: machineFactory(definition.body, data),
+		machine: machineFactory(definition.body, data, signature),
 		parameters,
 	}
 }
 
 function evaluateFunction(f, data) {
-	data.functions[f.name] = new Function(...f.params, f.body)
+	const fparams = f.params.map(p => p.text)
+	data.functions[f.name] = new Function(...fparams, f.body)
 }
 
 function execute(q, path) {
 	let data = {
 		query: null,
 		definitions: {},
-		functions: {}
+		functions: {},
+		scope: []
 	}
 	q.forEach((stmt) => {
 		switch(stmt.type) {
-			case "query": 
-				state.query = stmt
+			case "query":
+				data.query = stmt
 				break;
-			case "js_func": 
+			case "js_func": 				
 				evaluateFunction(stmt, data)
+				break;
 			case "definition":
 				evaluateDefinition(stmt, data)
-
+				break;
 		}
 	})
-	return executeQuery(state)
+	return executeQuery(data)
 }
 
 /*
@@ -405,4 +470,5 @@ files.forEach(filePath => {
 	}
 })
 */
-
+//TODO: Move everything to typescript
+// TODO: check why doesnt detect first occurrence

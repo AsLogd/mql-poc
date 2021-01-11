@@ -11,7 +11,7 @@ const keywords = [
 	"not",
 	"define",
 	"js",
-	"function",
+	"func",
 	"then",
 	"before",
 	// Subjects
@@ -29,7 +29,7 @@ const keywordsMap = Object.fromEntries(
 
 let lexer = moo.compile({
 	ws: 		{match: /[ \t\n\r]+/, lineBreaks: true},
-	block: 		{match: /\{[^]*\}/, lineBreaks: true},
+	block: 		{match: /\{[^]*?\}/, lineBreaks: true},
 	string: 	/"(?:\\["bfnrt\/\\]|\\u[a-fA-F0-9]{4}|[^"\\])*"/,
 	literal: 	{match: /[a-zA-Z_]+/, type: moo.keywords(keywordsMap)},
 	port:		/p[1-4]/,
@@ -43,6 +43,13 @@ let lexer = moo.compile({
 
 })
 
+function cleanBody(body) {
+	return {
+		...body,
+		text: body.text.slice(1, -1)
+	}
+}
+
 //TODO: refactor
 const identity		= (a)			     	=> a
 const takeFirst		= ([a])					=> a
@@ -53,7 +60,7 @@ const catWithRest 	= ([r, i])				=> [...(r||[]), i]
 const removeSecond 	= ([a, _, b])			=> [a, b]
 const removeSecondAndCat 	= ([a, _, b])	=> [...(a||[]), b]
 const query 		= ([target, _, succ])	=> ({type: "query",target, succession: succ})
-const succession 	= ([expr, succ])		=> ({type: "succession", expression: expr, temporals: succ})
+const succession 	= ([expr, succ])		=> ({type: "succession", temporals: [expr, ...succ]})
 const temporal 		= ([_, then, before])	=> ({type: "temporal", then, before})
 const specialTemporal = ([then, before])	=> ({type: "temporal", then, before})
 const infix 		= ([lval, op, rval]) 	=> ({type: "infix", op, lval, rval})
@@ -61,10 +68,8 @@ const prefix 		= ([op, rval])		 	=> ({type: "prefix", op, rval})
 const sentence 		= ([val])				=> ({type: "sentence", val})
 const paramRef 		= ([_, name])			=> ({type: "ref", name})
 const definition 	= ([_, __, s, ___, b])	=> ({type: "definition", signature: s, body: b})
-const js_func 		= ([name, params, body])=> ({type: "js_func", name, params, body: body.slice(1, -1)})
+const js_func 		= ([name, p, _, body])	=> ({type: "js_func", name, params: p, body: cleanBody(body)})
 const func 			= ([name, _, params])	=> ({type: "function", name, params})
-const funcDef 		= ([_, __, head, body]) => ({type: "function_def", head, body})
-const funcHeader 	= ([name, _, params]) 	=> ({type: "function_head", name, params}) 
 %} 
 
 @lexer lexer
@@ -75,11 +80,11 @@ statement ->
 	| js_func _ 							{% takeFirst %}
 	| query _ 								{% takeFirst %}
 
-js_func -> js_header js_params js_body		{% js_func %}
-js_header -> %js __ %function __ %literal	{% takeNth(4) %}
+js_func -> js_header js_params _ js_body	{% js_func %}
+js_header -> %js __ %func __ %literal		{% takeNth(4) %}
 js_params -> %lp _ js_plist:? _ %rp			{% takeNth(2) %}
-js_plist -> js_plist (%comma _) %literal	{% removeSecond %}
-	| %literal								{% takeFirst %}
+js_plist -> js_plist (%comma _) %literal	{% removeSecondAndCat %}
+	| %literal								{% identity %}
 js_body -> %block							{% takeFirst %}
 
 definition -> 
@@ -87,8 +92,8 @@ definition ->
 signature ->  
 	signature __ param_def 					{% removeSecondAndCat %}
 	| signature __ %literal					{% removeSecondAndCat %}
-	| param_def __ %literal					{% removeSecond %}
-	| %literal __ param_def 				{% removeSecond %}
+	| param_def								{% identity %}
+	| %literal 								{% identity %}
 
 param_def -> %literal %co type				{% infix %}
 
@@ -118,13 +123,13 @@ function_call ->
 sentence ->
 	sentence __ subject 					{% removeSecondAndCat %}
 	| sentence __ %literal					{% removeSecondAndCat %}
-	| subject __ %literal					{% removeSecond %}
-	| %literal __ subject 					{% removeSecond %}
+	| subject								{% identity %}
+	| %literal 								{% identity %}
 
 
 param_values ->
 	  param_values (%comma _) subject 		{% removeSecond %}
-	| subject 								{% takeFirst %}
+	| subject 								{% identity %}
 
 
 not			 -> __ %not __					{% removeFirst %}

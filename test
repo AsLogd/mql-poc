@@ -1,3 +1,31 @@
-matches where someone is "Falcon" and someone is "Fox"
-	then "falcon" jumps
-	then "fox" jumps before "falcon" is grounded
+js func is_grounded(c){
+	const char = c.character
+	return !char.post.isAirborne
+}
+
+define c:character is grounded = 
+	is_grounded($c)
+
+
+js func jumps(c){
+	const char = c.character
+	return char.post.actionStateId >= 25 && char.post.actionStateId <= 28
+}
+
+define c:character jumps = 
+	jumps($c)
+
+
+js func match_is_vs(a, b){
+	// If the signature is found, then the characters exist in the match
+	return true
+}
+
+define match is a:character vs b:character =
+	match_is_vs($a, $b)
+
+matches where match is "Falco" vs "Ganon"
+	then "ganon" jumps
+	then "falco" jumps before "ganon" is grounded
+
+

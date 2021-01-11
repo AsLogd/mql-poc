@@ -1,4 +1,9 @@
+js func hits_with(hitter, hitted, att) {
+	return true
+}
+
 define hitter:player hits rec:player with att:attack = 
 	hits_with($hitter, $rec, $att)
 
-matches where "aslo" hits "eibol" with "fair" and "aslo" dies
+matches where "aslo" hits "eibol" with "fair"
+	then "aslo" dies 		before "aslo" acts

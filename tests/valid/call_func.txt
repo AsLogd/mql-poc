@@ -1,1 +1,5 @@
+js func calling_function(a, b) {
+	return a.contains("A")
+}
+
 matches where calling_function("Player A", "Player B")

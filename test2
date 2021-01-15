@@ -1,0 +1,16 @@
+js func jumps(c){
+	const char = c.character
+	return char.post.actionStateId >= 25 && char.post.actionStateId <= 28
+}
+
+define c:character jumps = 
+	jumps($c)
+
+
+matches where 
+	 a: if "ganon" jumps	 		-> b 
+	 	elseif "falco" jumps	 	-> c
+	+b: if "falco" jumps 			-> a
+	+c: if "ganon" jumps 			-> a
+
+

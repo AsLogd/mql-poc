@@ -14,6 +14,9 @@ const keywords = [
 	"func",
 	"then",
 	"before",
+	"if",
+	"elseif",
+	"else",
 	// Subjects
 	"someone",
 	// Types
@@ -36,9 +39,11 @@ let lexer = moo.compile({
 	number: 	/[0-9]+(?:\.[0-9]+)?/,
 	lp:			"(",
 	rp:			")",
+	arrow:		"->",
 	co: 		":",
 	eq: 		"=",
 	dol: 		"$",
+	plus: 		"+",
 	comma:		","
 
 })
@@ -59,7 +64,7 @@ const takeNth 		= (n) => (vals)			=> vals[n]
 const catWithRest 	= ([r, i])				=> [...(r||[]), i]
 const removeSecond 	= ([a, _, b])			=> [a, b]
 const removeSecondAndCat 	= ([a, _, b])	=> [...(a||[]), b]
-const query 		= ([target, _, succ])	=> ({type: "query",target, succession: succ})
+const query 		= ([target, _, con])	=> ({type: "query",target, content: con})
 const succession 	= ([expr, succ])		=> ({type: "succession", temporals: [expr, ...succ]})
 const temporal 		= ([_, then, before])	=> ({type: "temporal", then, before})
 const specialTemporal = ([then, before])	=> ({type: "temporal", then, before})
@@ -68,8 +73,13 @@ const prefix 		= ([op, rval])		 	=> ({type: "prefix", op, rval})
 const sentence 		= ([val])				=> ({type: "sentence", val})
 const paramRef 		= ([_, name])			=> ({type: "ref", name})
 const definition 	= ([_, __, s, ___, b])	=> ({type: "definition", signature: s, body: b})
-const js_func 		= ([name, p, _, body])	=> ({type: "js_func", name, params: p, body: cleanBody(body)})
+const jsFunc 		= ([name, p, _, body])	=> ({type: "js_func", name, params: p, body: cleanBody(body)})
 const func 			= ([name, _, params])	=> ({type: "function", name, params})
+const dfa 			= ([a]) 				=> ({type: "dfa", rules: [a]})
+const addRule		= ([dfa, _, rule]) 		=> ({type: "dfa", rules: [...dfa.rules, rule]})
+const dfaRule 		= ([t, _, id, __, ife]) => ({type: "dfa_rule", isAccepting: !!t, id, if_expr: ife})
+const ifExpr 		= ([_, cont, elifs, el])=> ({type: "if_expr", conditions: [cont, ...elifs], else: el})
+const ifContent 	= ([_, expr, res]) 		=> ({type: "if_content", expression: expr, result: res})
 %} 
 
 @lexer lexer
@@ -80,7 +90,7 @@ statement ->
 	| js_func _ 							{% takeFirst %}
 	| query _ 								{% takeFirst %}
 
-js_func -> js_header js_params _ js_body	{% js_func %}
+js_func -> js_header js_params _ js_body	{% jsFunc %}
 js_header -> %js __ %func __ %literal		{% takeNth(4) %}
 js_params -> %lp _ js_plist:? _ %rp			{% takeNth(2) %}
 js_plist -> js_plist (%comma _) %literal	{% removeSecondAndCat %}
@@ -100,7 +110,21 @@ param_def -> %literal %co type				{% infix %}
 body -> %eq _ succession					{% removeTwo %}
 
 
-query 	-> target where succession			{% query %}
+query 	-> target where query_content		{% query %}
+
+query_content -> 
+	succession								{% takeFirst %}
+	| dfa 									{% takeFirst %}
+
+dfa -> dfa __ dfa_rule 						{% addRule %}
+	| dfa_rule								{% dfa %}
+dfa_rule -> %plus:? _ rule_id _ if_expr		{% dfaRule %}
+rule_id -> %literal _ %co 					{% takeNth(0) %}
+if_expr -> %if if_content else_if:* else:?  {% ifExpr %}
+else_if -> %elseif if_content				{% takeNth(1) %}
+else -> %else if_result						{% takeNth(1) %}
+if_content -> __ expression if_result		{% ifContent %}
+if_result -> __ %arrow _ %literal _ 		{% takeNth(3) %}
 
 succession -> special_temporal temporal:* 	{% succession %}
 temporal -> then expression before_expr:? 	{% temporal %}

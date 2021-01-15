@@ -100,6 +100,14 @@ parser.addArgument(
     defaultValue: '.'
   }
 );
+parser.addArgument(
+  [ '-a', '--ast' ],
+  {
+    help: 'Show AST',
+    const: true,
+    action: "storeTrue"
+  }
+);
 var args = parser.parseArgs();
 
 const files = glob.sync(args.query)
@@ -113,6 +121,10 @@ Log.info(content)
 const result = grammarparser.parse(content)
 if (!result.ok) {
   Log.error(result.reason)
+}
+
+if (args.ast) {
+	Log.printAST(result.value)
 }
 
 const query_result = execute(result.value, args.path);
@@ -318,7 +330,7 @@ function temporalFactory(temporal, data) {
 	}
 }
 
-function machineFactory(succession, data, name) {
+function temporalAutomataFactory(succession, data, name) {
 	const machine = {
 		temporals: succession.temporals.map((t) => temporalFactory(t, data)),
 		matched_at: [],
@@ -352,21 +364,105 @@ function machineFactory(succession, data, name) {
 	return machine
 }
 
+function dfaConditionFactory(cond, data) {
+	return {
+		expression: expressionFactory(cond.expression, data),
+		nextStateId: cond.result
+	}
+}
+
+function dfaRuleFactory(rule, data) {
+	const obj = {
+		id: rule.id,
+		isAccepting: rule.isAccepting,
+		conditions: rule.if_expr.conditions.map(c => dfaConditionFactory(c, data)),
+		else: rule.if_expr.else
+	}
+
+	obj.feedFrame = (frame, data) => {
+		const nextState = obj.conditions.find(c => 
+			c.expression.checkFrame(frame, data)
+		)
+		if (nextState) {
+			return nextState.nextStateId
+		}
+		if (obj.else) {
+			return obj.else
+		}
+		return null
+	}
+
+	return obj
+}
+
+function dfaFactory(dfadef, data, name) {
+	const rules = dfadef.rules.map((t) => dfaRuleFactory(t, data))
+	const dfa = {
+		rules: rules,
+		accepted_frames: [],
+		currentState: rules[0],
+		name
+	}
+	// returns true if the next state is accepting
+	dfa.feedFrame = (frame, data) => {
+		const nextStateId = dfa.currentState.feedFrame(frame, data)
+		if (nextStateId) {
+			const nextState = rules.find(r => r.id.text === nextStateId.text)
+			if (!nextState) {
+				console.info(`State \
+${nextStateId.text} at ${nextStateId.line}:${nextStateId.col} \
+doesn't exist`)
+			} else {
+				//console.log("<", name,">", "machine moves to state", nextState.id.text)
+				dfa.currentState = nextState
+			}
+		}
+		if (dfa.currentState.isAccepting) {
+			//console.log("<", name,">", "is in an accepting state", dfa.currentState.id.text)
+			dfa.accepted_frames.push(frame.frame)
+		}
+
+		return dfa.currentState.isAccepting
+	}
+
+	return dfa
+}
+
+function machineFromQuery(query, game, data) {
+	switch(query.content.type) {
+		case "succession": {
+			return temporalAutomataFactory(
+				query.content, 
+				// all checks inherit this data
+				{game, ...data},
+				"root"
+			)
+		}
+		case "dfa": {
+			return dfaFactory(
+				query.content,
+				{game, ...data},
+				"root"
+			)
+		}
+	}
+}
+
 function getFirstOccurrence(data) {
 	return (file) => {
 		//console.log("file", file)
 		const game = new SlippiGame(file)
 		const frames = game.getFrames()
-		const frameKeys = Object.keys(frames).map(f => parseInt(f)).sort((a, b) => a-b)
-		const rootMachine = machineFactory(
-			data.query.succession, 
-			// all checks inherit this data
-			{game, ...data},
-			"root"
+		const frameKeys = Object.keys(frames)
+			.map(f => parseInt(f))
+			.sort((a, b) => a-b)
+		const rootMachine = machineFromQuery(data.query, game, data)
+		const frame = frameKeys.find(f => 
+			rootMachine.feedFrame(frames[f], {game, ...data})
 		)
-		const frame = frameKeys.find(f => rootMachine.feedFrame(frames[f], {game, ...data}))
-		/*		
-		for(let i = 70; i < 135; i++){
+		//console.log(rootMachine)
+		/*
+		for(let i = -10; i < 0; i++){
 			console.log("------",i,"------")
 			console.log("-Falco")
 			console.log({
@@ -378,9 +474,9 @@ function getFirstOccurrence(data) {
 				airborne: frames[i].players[1].post.isAirborne,
 				state: frames[i].players[1].post.actionStateId
 			})
-		}*/
-				
-		return frame || -1
+		}
+		*/		
+		return frame
 	}
 }
 function executeQuery(data) {
@@ -392,7 +488,7 @@ function executeQuery(data) {
 	}
 	const gfo = getFirstOccurrence(data)
 	return files.map(f => ({f, o: gfo(f)}))
-		.filter(tuple => tuple.o >= 0)
+		.filter(tuple => !!tuple.o)
 		.map(tuple => `found occurrence in ${tuple.f} at frame ${tuple.o}`)
 }
 
@@ -411,7 +507,7 @@ function evaluateDefinition(definition, data) {
 		}
 	},"").slice(1)
 	data.definitions[signature] = {
-		machine: machineFactory(definition.body, data, signature),
+		machine: temporalAutomataFactory(definition.body, data, signature),
 		parameters,
 	}
 }
@@ -470,5 +566,15 @@ files.forEach(filePath => {
 	}
 })
 */
-//TODO: Move everything to typescript
-// TODO: check why doesnt detect first occurrence
+//TODO: replay inspection tool? for debugging purposes
+//TODO: Move everything to typescript (or try rescript)
+//TODO: someone literal?
+//TODO: 
+//future work
+//-define => sentence, filter, verb, function
+//-find alternative name to mql
+//-aliases for generic subjects
+//-match filter (instead of succession)
+//-verbs (and verb definition?). maybe just js function names with parameters
+//-graphical DFA's, syntax highlight
+//- "like", "from" keywords

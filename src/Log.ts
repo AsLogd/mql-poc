@@ -91,7 +91,6 @@ export default class Log {
 						console.log(`|-----${ind}Params:`)
 						printFunctionParams(term.params, level+2)
 						break;
-					
 					default:
 						console.log(`|----${ind}Expression:`)
 						printExpression(term, level+2)
@@ -114,6 +113,10 @@ export default class Log {
 					console.log(`|----${ind}Rval:`)
 					printExpression(expr.rval, level+2)
 					break;
+				case "sentence":
+					console.log(`|---${ind}Sentence:`)
+					printTerm(expr.val, level+2)
+					break;
 				default:
 					console.log(`|---${ind}Term:`)
 					printTerm(expr, level+1)
@@ -132,6 +135,42 @@ export default class Log {
 			printExpression(temporal.before, level+2)
 		}
 
+		function printCondition(cond: any, level: number) {
+            const ind = '-'.repeat(level)
+            console.info(`|--${ind}if:`)
+            printExpression(cond.expression, level+1)
+            console.info(`|--${ind}then go to: ${cond.result.text}`)
+        }
+
+        function printIfExpression(if_expr: any, level: number) {
+            const ind = '-'.repeat(level)
+            console.info(`|--${ind}if expr:`)
+            for (const cond of if_expr.conditions) {
+                printCondition(cond, level+1)
+            }
+            if(if_expr.else) {
+            	console.info(`|--${ind}else go to: ${if_expr.else.text}`)
+            }
+
+        }
+
+        function printDfaRule(rule: any, level: number) {
+            const ind = '-'.repeat(level)
+            console.info(`|--${ind}Id: ${rule.id}`)
+            if (rule.isAccepting) {
+                console.info(`|--${ind} Is Accepting`)
+            }
+            printIfExpression(rule.if_expr, level+1)
+        }
+
+        function printDfa(dfa: any, level: number) {
+            const ind = '-'.repeat(level)
+            console.info(`|--${ind}${dfa.type}`)
+            for (const t of dfa.rules) {
+                printDfaRule(t, level+1)
+            }
+        }
+
 		function printSuccession(succ: any, level:number) {
 			const ind = '-'.repeat(level)
 			console.info(`|--${ind}${succ.type}`)
@@ -141,12 +180,26 @@ export default class Log {
 			}			
 			
 		}
+
+		function printQueryContent(content:any) {
+			switch(content.type) {
+				case "succession": {
+					printSuccession(content, 0)
+					break
+				}
+				case "dfa": {
+					printDfa(content, 0)
+					break
+				}
+			}
+		}
+
 		function printStatement(obj: any) {
 			console.info(`|-${obj.type}`)
 			switch (obj.type) {
 				case "query":
 					printTarget(obj.target)
-					printSuccession(obj.succession, 0)
+					printQueryContent(obj.content)
 					break;
 				
 				case "definition":

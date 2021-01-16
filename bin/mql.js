@@ -356,10 +356,9 @@ function temporalAutomataFactory(succession, data, name) {
 			machine.currentStep += 1
 			if(machine.currentStep === machine.temporals.length) {
 				//console.log("and its a match")
-				machine.accepted_intervals.push({
-					start: machine.first_accepted,
-					end: frame.frame
-				})
+				machine.accepted_intervals.push(
+					[machine.first_accepted, frame.frame]
+				)
 				machine.first_accepted = null
 				machine.matched_at.push(frame.frame)
 				machine.currentStep = 0
@@ -505,7 +504,6 @@ function computeIntervals(frames) {
 	if (res.start !== res.last) {
 		res.intervals.push([res.start, res.last])
 	}
-	console.log(res)
 	return res.intervals
 }
 
@@ -521,7 +519,6 @@ function getFrameIntervals(data) {
 		frameKeys.forEach(f => 
 			rootMachine.feedFrame(frames[f], {game, ...data})
 		)
-		console.log(rootMachine)
 		// for now, different for dfa and succession
 		const intervals = rootMachine.accepted_intervals 
 			|| computeIntervals(rootMachine.accepted_frames)
@@ -545,12 +542,12 @@ function executeQuery(data) {
 		case "frames": {
 			const gi = getFrameIntervals(data)
 			return files.map(f => ({f, o: gi(f)}))
-				.filter(tuple => !!tuple.o)
+				.filter(tuple => tuple.o.length > 0)
 				.map(tuple => {
 					const intervals = tuple.o.reverse().reduce((pre, curr) =>
 						curr[0] !== curr[1]
-							? `[${curr[0]}, ${curr[1]}], ${pre}`
-							: `${curr[0]}, ${pre}`
+							? `[${curr[0]}, ${curr[1]}],\t${pre}`
+							: `${curr[0]},\t\t${pre}`
 					, "")
 					return `found occurrence in ${tuple.f} at the following intervals:
 ${intervals}`

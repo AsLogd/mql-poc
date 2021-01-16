@@ -24,7 +24,7 @@ js func match_is_vs(a, b){
 define match is a:character vs b:character =
 	match_is_vs($a, $b)
 
-matches where match is "Falco" vs "Ganon"
+frames where match is "Falco" vs "Ganon"
 	then "ganon" jumps
 	then "falco" jumps before "ganon" is grounded
 

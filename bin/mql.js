@@ -333,7 +333,9 @@ function temporalFactory(temporal, data) {
 function temporalAutomataFactory(succession, data, name) {
 	const machine = {
 		temporals: succession.temporals.map((t) => temporalFactory(t, data)),
+		accepted_intervals: [],
 		matched_at: [],
+		first_accepted: null,
 		currentStep: 0,
 		name
 	}
@@ -344,14 +346,21 @@ function temporalAutomataFactory(succession, data, name) {
 		if(beforeExpr && beforeExpr.checkFrame(frame, data)) {
 			//console.log("<", name,">", "machine has triggered 'before' at frame", frame.frame)
 			machine.currentStep = 0
+			machine.first_accepted = null
 		}
 		if(thenExpr.checkFrame(frame, data)) {
 			//console.log("<", name,">", "machine is advancing to step", machine.currentStep+1, " at frame", frame.frame)
-
+			if (!machine.first_accepted) {
+				machine.first_accepted = frame.frame
+			}
 			machine.currentStep += 1
 			if(machine.currentStep === machine.temporals.length) {
 				//console.log("and its a match")
-
+				machine.accepted_intervals.push({
+					start: machine.first_accepted,
+					end: frame.frame
+				})
+				machine.first_accepted = null
 				machine.matched_at.push(frame.frame)
 				machine.currentStep = 0
 				return true
@@ -479,17 +488,75 @@ function getFirstOccurrence(data) {
 		return frame
 	}
 }
+
+function computeIntervals(frames) {
+	const res = frames.reduce((pre, curr) => {
+		if (curr - pre.last > 1) {
+			pre.intervals.push([pre.start, pre.last])
+			pre.start = curr
+		}
+		pre.last = curr
+		return pre
+	}, {
+		intervals: [],
+		start: frames[0],
+		last: frames[0]
+	})
+	if (res.start !== res.last) {
+		res.intervals.push([res.start, res.last])
+	}
+	console.log(res)
+	return res.intervals
+}
+
+function getFrameIntervals(data) {
+	return (file) => {
+		//console.log("file", file)
+		const game = new SlippiGame(file)
+		const frames = game.getFrames()
+		const frameKeys = Object.keys(frames)
+			.map(f => parseInt(f))
+			.sort((a, b) => a-b)
+		const rootMachine = machineFromQuery(data.query, game, data)
+		frameKeys.forEach(f => 
+			rootMachine.feedFrame(frames[f], {game, ...data})
+		)
+		console.log(rootMachine)
+		// for now, different for dfa and succession
+		const intervals = rootMachine.accepted_intervals 
+			|| computeIntervals(rootMachine.accepted_frames)
+		return intervals
+	}
+}
+
 function executeQuery(data) {
-	// TODO: frames target
 	const files = glob.sync(`${args.path}/**/*.slp`)
 	if(files.length === 0) {
 		Log.info(`No files found at ${args.path}`)
 		return []
 	}
-	const gfo = getFirstOccurrence(data)
-	return files.map(f => ({f, o: gfo(f)}))
-		.filter(tuple => !!tuple.o)
-		.map(tuple => `found occurrence in ${tuple.f} at frame ${tuple.o}`)
+	switch(data.query.target.text) {
+		case "matches": {
+			const gfo = getFirstOccurrence(data)
+			return files.map(f => ({f, o: gfo(f)}))
+				.filter(tuple => !!tuple.o)
+				.map(tuple => `found occurrence in ${tuple.f} at frame ${tuple.o}`)
+		}
+		case "frames": {
+			const gi = getFrameIntervals(data)
+			return files.map(f => ({f, o: gi(f)}))
+				.filter(tuple => !!tuple.o)
+				.map(tuple => {
+					const intervals = tuple.o.reverse().reduce((pre, curr) =>
+						curr[0] !== curr[1]
+							? `[${curr[0]}, ${curr[1]}], ${pre}`
+							: `${curr[0]}, ${pre}`
+					, "")
+					return `found occurrence in ${tuple.f} at the following intervals:
+${intervals}`
+				})
+		}
+	}
 }
 
 function evaluateDefinition(definition, data) {
@@ -540,41 +607,17 @@ function execute(q, path) {
 	return executeQuery(data)
 }
 
-/*
-Log.info("Parsing...")
-let parsed = 0
-files.forEach(filePath => {
-	const parser = args.raw ? Parser.parseRaw : Parser.parse
-	const check = !args.skip
-	const result = parser(content, check)
-	const baseName = path.basename(filePath, path.extname(filePath))
-	switch(result.ok) {
-		case true:
-			fs.mkdirSync(args.output, {recursive: true})
-			const outputPath = path.join(args.output, `${baseName}.json`)
-			const output = args.prettify
-				? JSON.stringify(result.value, null, args.prettify)
-				: JSON.stringify(result.value)
-			fs.writeFileSync(outputPath, output)
-			Log.ok(`	- ${filePath} - OK`)
-			parsed += 1
-			break
-		case false:
-			Log.error(`	- ${filePath} - KO`)
-			Log.error(result.reason.error.reason)
-			break
-	}
-})
-*/
-//TODO: replay inspection tool? for debugging purposes
-//TODO: Move everything to typescript (or try rescript)
-//TODO: someone literal?
-//TODO: 
-//future work
-//-define => sentence, filter, verb, function
-//-find alternative name to mql
-//-aliases for generic subjects
-//-match filter (instead of succession)
-//-verbs (and verb definition?). maybe just js function names with parameters
-//-graphical DFA's, syntax highlight
-//- "like", "from" keywords
+//future work:
+//-find cool name
+//-graphical DFA's
+//-syntax highlight
+//-move to typed lang (typescript or rescript)
+//-better error detection and reporting
+
+// TODO:
+// - define => sentence, filter, verb, function
+// - time
+// - "someone" literal
+// - aliases for subjects
+// - "from" ("like" could be done with from?)
+// - basic verbs (play, record, copy)

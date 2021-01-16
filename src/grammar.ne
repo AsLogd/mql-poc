@@ -4,6 +4,7 @@ const moo = require('moo')
 const keywords = [
 	//Targets
 	"matches",
+	"frames",
 	// Keywords
 	"where",
 	"and",
@@ -164,7 +165,7 @@ then		 -> __ %then __					{% removeFirst %}
 before		 -> __ %before __				{% removeFirst %}
 
 param_ref -> %dol %literal					{% paramRef %}
-subject		 -> 
+subject -> 
 	%someone 								{% takeFirst %}
 	| %string								{% takeFirst %}
 	| %number								{% takeFirst %}
@@ -175,7 +176,9 @@ type ->
 	| %character							{% takeFirst %}
 	| %attack								{% takeFirst %}
 
-target		 -> %matches					{% identity %}
+target -> 
+	%matches 								{% takeFirst %}
+	| %frames								{% takeFirst %}
 
 __ 			 -> %ws 						{% null %}
 _  			 -> %ws:?						{% null %}

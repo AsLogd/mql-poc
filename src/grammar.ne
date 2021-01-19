@@ -10,12 +10,13 @@ const keywords = [
 	"and",
 	"or",
 	"not",
-	"define",
 	"then",
 	"before",
 	"if",
 	"elseif",
 	"else",
+	"sentence",
+	"verb",
 	"function",
 	// Subjects
 	"someone",
@@ -59,7 +60,7 @@ function cleanBody(body) {
 	}
 }
 
-//TODO: refactor
+//TODO: refactor, separate types on def and value?
 const identity		= (a)			     	=> a
 const takeFirst		= ([a])					=> a
 const removeFirst   = ([_, a]) 				=> a
@@ -68,7 +69,7 @@ const takeNth 		= (n) => (vals)			=> vals[n]
 const catWithRest 	= ([r, i])				=> [...(r||[]), i]
 const removeSecond 	= ([a, _, b])			=> [a, b]
 const removeSecondAndCat 	= ([a, _, b])	=> [...(a||[]), b]
-const query 		= ([target, _, con])	=> ({type: "query",target, content: con})
+const query 		= ([verb, trgt, _, con])=> ({type: "query",target: trgt, content: con, verb})
 const succession 	= ([expr, succ])		=> ({type: "succession", temporals: [expr, ...succ]})
 const temporal 		= ([_, then, before])	=> ({type: "temporal", then, before})
 const specialTemporal = ([then, before])	=> ({type: "temporal", then, before})
@@ -76,8 +77,9 @@ const infix 		= ([lval, op, rval]) 	=> ({type: "infix", op, lval, rval})
 const prefix 		= ([op, rval])		 	=> ({type: "prefix", op, rval})
 const sentence 		= ([val])				=> ({type: "sentence", val})
 const paramRef 		= ([_, name])			=> ({type: "ref", name})
-const definition 	= ([_, __, s, ___, b])	=> ({type: "definition", signature: s, body: b})
+const definition 	= ([_, __, s, ___, b])	=> ({type: "sentence", signature: s, body: b})
 const jsFunc 		= ([name, p, _, body])	=> ({type: "js_func", name, params: p, body: cleanBody(body)})
+const verb 			= ([name, p, _, body])	=> ({type: "verb", name, params: p, body: cleanBody(body)})
 const func 			= ([name, _, params])	=> ({type: "function", name, params})
 const dfa 			= ([a]) 				=> ({type: "dfa", rules: [a]})
 const addRule		= ([dfa, _, rule]) 		=> ({type: "dfa", rules: [...dfa.rules, rule]})
@@ -90,8 +92,9 @@ const ifContent 	= ([_, expr, res]) 		=> ({type: "if_content", expression: expr,
 
 start	-> _ statement:+					{% removeFirst %}
 statement ->	
-	  definition _ 							{% takeFirst %}
+	  sentence_def _ 						{% takeFirst %}
 	| js_func _ 							{% takeFirst %}
+	| verb _ 								{% takeFirst %}
 	| query _ 								{% takeFirst %}
 
 js_func -> js_header js_params _ js_body	{% jsFunc %}
@@ -101,19 +104,28 @@ js_plist -> js_plist (%comma _) %literal	{% removeSecondAndCat %}
 	| %literal								{% identity %}
 js_body -> %block							{% takeFirst %}
 
-definition -> 
-	%define __ signature __ body 			{% definition %}
+sentence_def -> 
+	%sentence __ signature __ body 			{% definition %}
 signature ->  
 	signature __ param_def 					{% removeSecondAndCat %}
 	| signature __ %literal					{% removeSecondAndCat %}
 	| param_def								{% identity %}
 	| %literal 								{% identity %}
 
+verb -> 
+	verb_header js_params _ js_body 		{% verb %}
+verb_header -> %verb __ %literal			{% takeNth(2) %}
+
 param_def -> %literal %co type				{% infix %}
 
 body -> %eq _ query_content					{% removeTwo %}
 
-query 	-> target where query_content		{% query %}
+query -> 
+	verb_call target where query_content	{% query %}
+
+verb_call ->
+	%literal __ 							{% takeFirst %}
+	| function_call __ 						{% func %}
 
 query_content -> 
 	succession								{% takeFirst %}

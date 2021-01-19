@@ -78,11 +78,8 @@ if (args.ast) {
 	Log.printAST(result.value)
 }
 
-const query_result = execute(result.value, args.path);
+execute(result.value, args.path);
 
-query_result.forEach((m) => {
-	Log.info(`-${m}`)
-})
 
 function stateNameFromState(id) {
 	return Data.stateNames[id]
@@ -297,7 +294,7 @@ function checkExpressionForFrame(expr, frame, data) {
 				}
 			}
 			const jsig = signature.join("_")
-			const definition = data.definitions[jsig]
+			const definition = data.sentences[jsig]
 			//console.log("defs",data.definitions)
 			//console.log("searching signature", signature.join("_"))
 			//console.log("found", definition)
@@ -587,17 +584,20 @@ function executeQuery(data) {
 		Log.info(`No files found at ${args.path}`)
 		return []
 	}
+	let result
 	switch(data.query.target.text) {
 		case "matches": {
 			const gfo = getFirstOccurrence(data)
-			return files.map(f => ({f, o: gfo(f)}))
-				.filter(tuple => !!tuple.o)
-				.map(tuple => `found occurrence in ${tuple.f} at frame ${tuple.o}`)
+			const fs = files.map(f => ({file:f, first_occurrence: gfo(f)}))
+				.filter(tuple => !!tuple.first_occurrence)
+				//.map(tuple => `found occurrence in ${tuple.f} at frame ${tuple.o}`)
+			result = {target: "matches", files: fs}
 		}
 		case "frames": {
 			const gi = getFrameIntervals(data)
-			return files.map(f => ({f, o: gi(f)}))
-				.filter(tuple => tuple.o.length > 0)
+			const fs = files.map(f => ({file:f, intervals: gi(f)}))
+				.filter(tuple => tuple.intervals.length > 0)
+				/*
 				.map(tuple => {
 					const intervals = tuple.o.reverse().reduce((pre, curr) =>
 						curr[0] !== curr[1]
@@ -606,18 +606,26 @@ function executeQuery(data) {
 					, "")
 					return `found occurrence in ${tuple.f} at the following intervals:
 ${intervals}`
-				})
+				})*/
+			result = {target: "frames", files: fs}
 		}
+	}
+	if (data.query.verb.type === "function") {
+		data.verbs[data.query.verb.name](result, ...processParameters(data.query.verb.params))
+	} else {
+		data.verbs[data.query.verb.text](result)
 	}
 }
 
-function evaluateDefinition(definition, data) {
+function evaluateSentence(definition, data) {
 	const parameters = []
 	const signature = definition.signature.reduce((pre, curr) => {
 		switch (curr.type) {
 			case "infix":
 				//TODO: do better? fix in grammar?
-				const typename = curr.rval === "number_val" ? "number" : curr.rval
+				const typename = curr.rval.value.includes("_val") 
+					? curr.rval.value.slice(0, -4) 
+					: curr.rval.value
 				parameters.push(curr.lval)
 				return `${pre}_${typename}`
 			case "literal":
@@ -627,7 +635,7 @@ function evaluateDefinition(definition, data) {
 				console.error("Unknown token:", curr)
 		}
 	},"").slice(1)
-	data.definitions[signature] = {
+	data.sentences[signature] = {
 		machine: machineFromDefinition(definition.body, data, signature),
 		parameters,
 	}
@@ -639,11 +647,17 @@ function evaluateFunction(f, data) {
 	data.functions[f.name.value] = new Function(...fparams, f.body.text)
 }
 
+function evaluateVerb(f, data) {
+	const fparams = f.params.map(p => p.text)
+	data.verbs[f.name.value] = new Function(...fparams, f.body.text)
+}
+
 function execute(q, path) {
 	let data = {
 		query: null,
-		definitions: {},
+		sentences: {},
 		functions: {},
+		verbs: {},
 		scope: [],
 		automata: []
 	}
@@ -652,31 +666,34 @@ function execute(q, path) {
 			case "query":
 				data.query = stmt
 				break;
-			case "js_func": 				
+			case "js_func": 
 				evaluateFunction(stmt, data)
 				break;
-			case "definition":
-				evaluateDefinition(stmt, data)
+			case "verb":
+				evaluateVerb(stmt, data)
+				break;
+			case "sentence":
+				evaluateSentence(stmt, data)
 				break;
 		}
 	})
-	//console.log(data)
-	return executeQuery(data)
+	executeQuery(data)
 }
 
 //future work:
-//-find cool name
+//-find cool name (Inspector Batra?)
 //-graphical DFA's
 //-syntax highlight
 //-move to typed lang (typescript or rescript)
 //-better error detection and reporting
+//-better signatures to allow type hierarchy
 //-templating system for definitions
 //-exists vs forall behaviour (when searching for a frame match, 'always' keyword?)
 
 // TODO:
-// - import std
 // - "someone" literal
+// - allow functions to write to global data
 // - aliases for subjects
-// - define => sentence, verb
 // - "from" ("like" could be done with from?)
 // - basic verbs (play, record, copy)
+// - import std

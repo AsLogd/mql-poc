@@ -12,34 +12,39 @@ function char_is_in_state(c, name, state) #{
 	return char.post.actionStateId === stateId
 }#
 
-define c:character is jumping = 
+sentence c:character is jumping = 
 	char_is_in_state_interval($c, "JumpF", "JumpAerialB")
 
-define c:character is dodging = 
+sentence c:character is dodging = 
 	char_is_in_state_interval($c, "EscapeF", "EscapeAir")
 
-define c:character is in state:string = 
+sentence c:character is in state:string = 
 	char_is_in_state($c, $state)
 
-define c:character jumps =
-	start: 	if not "ganon" is jumping 		-> nj
-	nj: 	if "ganon" is jumping 			-> jp
-	+jp: 	if true 						-> start
+verb log(results) #{
+	if (results.target === "matches") {
+		console.group("Found occurrences on the following files:")
+		results.forEach(res => 
+			console.log(`-${res.file} at frame ${res.first_occurrence}`)
+		)
+		console.groupEnd()
+	} else {
+		console.group("Found occurrences on the following files:")
+		results.files.forEach(res => {
+			console.group(`-${res.file} at intervals:`)
+			console.log(res.intervals.reverse().reduce((pre, curr) =>
+				curr[0] !== curr[1]
+					? `[${curr[0]} (${curr[0]+123}), ${curr[1]} (${curr[1]+123})],\t${pre}`
+					: `${curr[0]} (${curr[0]+123}),\t\t${pre}`
+			, ""))
+			console.groupEnd()
 
-define c:character dodges = 
-	start: 	if not "ganon" is dodging 		-> ndg
-	ndg: 	if "ganon" is dodging 			-> dg
-	+dg: 	if true							-> start
+		})
+		console.groupEnd()
+	}
+}#
 
-define c:character is wavedashing =
-	start: 		if $c is in "KneeBend"					-> jmp
-	jmp: 		if $c is in "LandingFallSpecial"		-> wd
-				elseif $c is jumping 					-> jmp
-				elseif $c is dodging 					-> jmp
-				else 				 					-> start
-	+wd:		if not $c is in "LandingFallSpecial"	-> start
-
-frames where 	
+log frames where 	
 	start: 		if "ganon" is in "KneeBend"					-> jmp
 	jmp: 		if "ganon" is in "LandingFallSpecial"		-> wd
 				elseif "ganon" is jumping 					-> jmp

@@ -1,16 +1,51 @@
-js func jumps(c){
+function char_is_in_state_interval(c, lb, hb, state) #{
 	const char = c.character
-	return char.post.actionStateId >= 25 && char.post.actionStateId <= 28
-}
+	const lbId = state.data.stateNames.findIndex(s => s.toLowerCase() === lb.val)
+	const hbId = state.data.stateNames.findIndex(s => s.toLowerCase() === hb.val)
+	return lbId <= char.post.actionStateId 
+		&& char.post.actionStateId <= hbId 
+}#
 
-define c:character jumps = 
-	jumps($c)
+function char_is_in_state(c, name, state) #{
+	const char = c.character
+	const stateId = state.data.stateNames.findIndex(s => s.toLowerCase() === name.val)
+	return char.post.actionStateId === stateId
+}#
 
+define c:character is jumping = 
+	char_is_in_state_interval($c, "JumpF", "JumpAerialB")
 
-frames where 
-	 a: if "ganon" jumps	 		-> b 
-	 	elseif "falco" jumps	 	-> c
-	+b: if "falco" jumps 			-> a
-	+c: if "ganon" jumps 			-> a
+define c:character is dodging = 
+	char_is_in_state_interval($c, "EscapeF", "EscapeAir")
+
+define c:character is in state:string = 
+	char_is_in_state($c, $state)
+
+define c:character jumps =
+	start: 	if not "ganon" is jumping 		-> nj
+	nj: 	if "ganon" is jumping 			-> jp
+	+jp: 	if true 						-> start
+
+define c:character dodges = 
+	start: 	if not "ganon" is dodging 		-> ndg
+	ndg: 	if "ganon" is dodging 			-> dg
+	+dg: 	if true							-> start
+
+define c:character is wavedashing =
+	start: 		if $c is in "KneeBend"					-> jmp
+	jmp: 		if $c is in "LandingFallSpecial"		-> wd
+				elseif $c is jumping 					-> jmp
+				elseif $c is dodging 					-> jmp
+				else 				 					-> start
+	+wd:		if not $c is in "LandingFallSpecial"	-> start
+
+frames where 	
+	start: 		if "ganon" is in "KneeBend"					-> jmp
+	jmp: 		if "ganon" is in "LandingFallSpecial"		-> wd
+				elseif "ganon" is jumping 					-> jmp
+				elseif "ganon" is dodging 					-> jmp
+				elseif "ganon" is in "KneeBend"				-> jmp
+				else 				 						-> start
+	+wd:		if not "ganon" is in "LandingFallSpecial"	-> start
 
 

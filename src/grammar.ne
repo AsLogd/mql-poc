@@ -11,19 +11,21 @@ const keywords = [
 	"or",
 	"not",
 	"define",
-	"js",
-	"func",
 	"then",
 	"before",
 	"if",
 	"elseif",
 	"else",
+	"function",
 	// Subjects
 	"someone",
 	// Types
 	"player",
 	"character",
 	"attack",
+	"port",
+	"string",
+	"number",
 ]
 
 //TOOD: something happens when reading tabs from stdin
@@ -33,11 +35,11 @@ const keywordsMap = Object.fromEntries(
 
 let lexer = moo.compile({
 	ws: 		{match: /[ \t\n\r]+/, lineBreaks: true},
-	block: 		{match: /\{[^]*?\}/, lineBreaks: true},
-	string: 	/"(?:\\["bfnrt\/\\]|\\u[a-fA-F0-9]{4}|[^"\\])*"/,
+	block: 		{match: /\#\{[^]*?\}\#/, lineBreaks: true},
+	string_val: /"(?:\\["bfnrt\/\\]|\\u[a-fA-F0-9]{4}|[^"\\])*"/,
+	port_val:	/p[1-4]/,
+	number_val: /[0-9]+(?:\.[0-9]+)?/,
 	literal: 	{match: /[a-zA-Z_]+/, type: moo.keywords(keywordsMap)},
-	port:		/p[1-4]/,
-	number: 	/[0-9]+(?:\.[0-9]+)?/,
 	lp:			"(",
 	rp:			")",
 	arrow:		"->",
@@ -49,10 +51,11 @@ let lexer = moo.compile({
 
 })
 
+//TODO: do the same with "port" and "string"?
 function cleanBody(body) {
 	return {
 		...body,
-		text: body.text.slice(1, -1)
+		text: body.text.slice(2, -2)
 	}
 }
 
@@ -92,7 +95,7 @@ statement ->
 	| query _ 								{% takeFirst %}
 
 js_func -> js_header js_params _ js_body	{% jsFunc %}
-js_header -> %js __ %func __ %literal		{% takeNth(4) %}
+js_header -> %function __ %literal			{% takeNth(2) %}
 js_params -> %lp _ js_plist:? _ %rp			{% takeNth(2) %}
 js_plist -> js_plist (%comma _) %literal	{% removeSecondAndCat %}
 	| %literal								{% identity %}
@@ -108,8 +111,7 @@ signature ->
 
 param_def -> %literal %co type				{% infix %}
 
-body -> %eq _ succession					{% removeTwo %}
-
+body -> %eq _ query_content					{% removeTwo %}
 
 query 	-> target where query_content		{% query %}
 
@@ -135,7 +137,7 @@ before_expr -> before expression 			{% removeFirst %}
 expression -> 
 	  expression and term _					{% infix %}
 	| expression or term _					{% infix %}
-	| not expression _						{% prefix %}
+	| not term _							{% prefix %}
 	| term _								{% takeFirst %}
 term ->
 	sentence								{% sentence %}
@@ -153,11 +155,11 @@ sentence ->
 
 
 param_values ->
-	  param_values (%comma _) subject 		{% removeSecond %}
+	  param_values (%comma _) subject 		{% removeSecondAndCat %}
 	| subject 								{% identity %}
 
 
-not			 -> __ %not __					{% removeFirst %}
+not			 -> %not __ 					{% removeFirst %}
 and			 -> __ %and __					{% removeFirst %}
 or			 -> __ %or __					{% removeFirst %}
 where		 -> __ %where __				{% removeFirst %}
@@ -167,15 +169,17 @@ before		 -> __ %before __				{% removeFirst %}
 param_ref -> %dol %literal					{% paramRef %}
 subject -> 
 	%someone 								{% takeFirst %}
-	| %string								{% takeFirst %}
-	| %number								{% takeFirst %}
-	| %port									{% takeFirst %}
+	| %string_val							{% takeFirst %}
+	| %number_val							{% takeFirst %}
+	| %port_val								{% takeFirst %}
 	| param_ref								{% takeFirst %}
 type ->
 	 %player								{% takeFirst %}
+	| %port									{% takeFirst %}
 	| %character							{% takeFirst %}
 	| %attack								{% takeFirst %}
-
+	| %string								{% takeFirst %}
+	| %number 								{% takeFirst %}
 target -> 
 	%matches 								{% takeFirst %}
 	| %frames								{% takeFirst %}

@@ -1,25 +1,43 @@
-js func is_grounded(c){
+function time_pass(mu, q, state) #{
+	const dframes = state.frame - state.inRuleSince
+	switch(mu) {
+		case "frames":
+			return dframes > q
+		case "secs":
+			return dframes/60 > q
+	}
+}#
+
+function is_grounded(c) #{
 	const char = c.character
 	return !char.post.isAirborne
-}
+}#
 
 define c:character is grounded = 
 	is_grounded($c)
 
 
-js func jumps(c){
+function is_jumping(c) #{
 	const char = c.character
 	return char.post.actionStateId >= 25 && char.post.actionStateId <= 28
-}
+}#
+
+define c:character is jumping = 
+	is_jumping($c)
 
 define c:character jumps = 
-	jumps($c)
+	not $c is jumping then $c is jumping before 2 ticks pass
 
-
-js func match_is_vs(a, b){
+function match_is_vs(a, b) #{
 	// If the signature is found, then the characters exist in the match
 	return true
-}
+}#
+
+define s:number seconds pass =
+	time_pass("secs", $s)
+
+define f:number ticks pass =
+	time_pass("frames", $f)
 
 define match is a:character vs b:character =
 	match_is_vs($a, $b)
@@ -28,4 +46,5 @@ frames where match is "Falco" vs "Ganon"
 	then "ganon" jumps
 	then "falco" jumps before "ganon" is grounded
 
-
+frames where "ganon" jumps
+	then "ganon" jumps before 2 seconds pass

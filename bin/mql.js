@@ -1,75 +1,11 @@
 #! /usr/bin/env node
-// Index === attack id
-// Values in second dimension are aliases for that attack
-const attackNames = [
-	["none"],
-	["non staling"],
-	["jab 1"],
-	["jab 2"],
-	["jab 3"],
-	["rapid jabs"],
-	["dash attack"],
-	["side tilt"],
-	["up tilt"],
-	["down tilt"],
-	["side smash"],
-	["up smash"],
-	["down smash"],
-	["nair"],
-	["fair"],
-	["bair"],
-	["uair"],
-	["dair"],
-	["neutral special"],
-	["side special"],
-	["up special"],
-	["down special"],
-]
-
-// Index === character id
-// Values in second dimension are aliases for that character
-const characterNames = [
-	["mario"],
-	["fox"],
-	["captain falcon", "falcon", "capt falcon"],
-	["donkey kong", "dk"],
-	["kirby"],
-	["bowser"],
-	["link"],
-	["sheik"],
-	["ness"],
-	["peach"],
-	["popo", "ice climbers"],
-	["nana"],
-	["pikachu"],
-	["samus"],
-	["yoshi"],
-	["jigglypuff"],
-	["mewtwo"],
-	["luigi"],
-	["marth"],
-	["zelda"],
-	["young link"],
-	["dr mario"],
-	["falco"],
-	["pichu"],
-	["mr game & watch", "game & watch", "game and watch", "mr game and watch", "g&w"],
-	["ganondorf", "ganon"],
-	["roy"],
-	["master hand"],
-	["crazy hand"],
-	["wireframe male"],
-	["wireframe female"],
-	["giga bowser"],
-	["sandbag"],
-]
-
 const util = require('util')
 const fs = require("fs")
 const path = require("path")
 const glob = require("glob")
 const grammarparser = require("../lib/index").default
 const Log = require("../lib/Log").default
+const Data = require("./data.js")
 var ArgumentParser = require('argparse').ArgumentParser;
 const { default: SlippiGame } = require('@slippi/slippi-js');
 
@@ -97,7 +33,7 @@ parser.addArgument(
   [ '-p', '--path' ],
   {
     help: 'Replays path',
-    defaultValue: '.'
+    defaultValue: './**/*.slp'
   }
 );
 parser.addArgument(
@@ -106,6 +42,21 @@ parser.addArgument(
     help: 'Show AST',
     const: true,
     action: "storeTrue"
+  }
+);
+parser.addArgument(
+  [ '-d', '--debug' ],
+  {
+    help: 'Show state machine changes',
+    const: true,
+    action: "storeTrue"
+  }
+);
+parser.addArgument(
+  [ '-i', '--inspect' ],
+  {
+    help: 'Show frame data in given interval. Add pre/post to limit scope e.g. -i "120,230,post"',
+    defaultValue: null
   }
 );
 var args = parser.parseArgs();
@@ -133,10 +84,58 @@ query_result.forEach((m) => {
 	Log.info(`-${m}`)
 })
 
+function stateNameFromState(id) {
+	return Data.stateNames[id]
+}
 
+function charNameFromId(id) {
+	return Data.characterNames[id]
+}
+
+function inspectPost(p) {
+	return {
+		//port: p.post.playerIndex + 1,
+		char: charNameFromId(p.post.internalCharacterId)[0],
+		state: `${stateNameFromState(p.post.actionStateId)} ctr: ${p.post.actionStateCounter.toFixed(2)}`,
+		percent: p.post.percent.toFixed(2),
+		stocks: p.post.stocksRemaining,
+		inAir: p.post.isAirborne,
+		jmps: p.post.jumpsRemaining,
+		//speed: p.post.selfInducedSpeeds,
+		pos: `x:${p.post.positionX.toFixed(2)}, y:${p.post.positionY.toFixed(2)}`,
+		dir: p.post.facingDirection, 
+		shield: p.post.shieldSize,
+		lAttLand: p.post.lastAttackLanded,
+		lHitBy: p.post.lastHitBy
+	}
+}
+
+function inspectPre(p) {
+	return {
+		//port: p.pre.playerIndex + 1,
+		postchar: charNameFromId(p.post.internalCharacterId)[0],
+		state: `${stateNameFromState(p.pre.state)} (${p.pre.actionStateCounter})`,
+		pos: `x:${p.pre.positionX.toFixed(2)}, y:${p.pre.positionY.toFixed(2)}`,
+		joystick: `[${p.pre.joystickX.toFixed(2)},${p.pre.joystickY.toFixed(2)}]`,
+		cStick: `[${p.pre.cStickX.toFixed(2)},${p.pre.cStickY.toFixed(2)}]`,
+		trigger: `${p.pre.trigger.toFixed(2)}  \
+(L: ${p.pre.physicalLTrigger.toFixed(2)}, R: ${p.pre.physicalRTrigger.toFixed(2)},)`,
+		//TODO: show button names?
+		buttons: `${p.pre.buttons} (${p.pre.physicalButtons})`,
+		percent: p.pre.percent.toFixed(2),
+		dir: p.pre.facingDirection, 
+	}
+}
+
+function checkDebug(f) {
+	const interval = args.inspect && args.inspect.split(",").map(i => parseInt(i))	
+	return args.debug 
+		&& (!args.inspect 
+			|| interval[0] < f && f < interval[1])
+}
 
 function characterIdFromName(name) {
-	const index = characterNames.findIndex((tuple) => 
+	const index = Data.characterNames.findIndex((tuple) => 
 		tuple.some(x => x === name)
 	)
 
@@ -144,7 +143,7 @@ function characterIdFromName(name) {
 }
 
 function attackIdFromName(name) {
-	const index = attackNames.findIndex((tuple) => 
+	const index = Data.attackNames.findIndex((tuple) => 
 		tuple.some(x => x === name)
 	)
 
@@ -208,20 +207,18 @@ function parseValue(value, frame, data) {
 			return "someone"
 		case "match":
 			return data.settings
-		case "string": {
+		case "string_val": {
 			const content = value.text.slice(1, -1).toLowerCase()
 			const val = getCharacter(content, frame, data) 
 				|| getAttack(content)
 				|| getPlayerFromName(content, frame, data)
-			//character or player not found on this replay or unrecognized string
-			if (!val) {
-				return "unknown"
-			}
+				|| {type: "string", val: content}
+
 			return val
 		}
-		case "number":
-			return Number.parseFloat(value.text)
-		case "port": {
+		case "number_val":
+			return {type:"number", val: Number.parseFloat(value.text)}
+		case "port_val": {
 			const portNumber = parseInt(val.slice(1))
 			const val = getPlayer(portNumber)
 			if (!val) {
@@ -232,11 +229,10 @@ function parseValue(value, frame, data) {
 		}
 		case "ref": {
 			if(data.scope.length === 0) {
-				console.error("Undefined reference: ", value.name.text)
+				console.error("Undefined scope for: ", value.name.text)
 				return "error"
 			}
 			const scope = data.scope[data.scope.length - 1]
-
 			if(!scope[value.name.text]) {
 				console.error("Undefined reference: ", value.name.text)
 				return "error"
@@ -275,8 +271,12 @@ function checkExpressionForFrame(expr, frame, data) {
 			// Only not for now
 			return !checkExpressionForFrame(expr.rval, frame, data)
 		case "function":{
-			if(data.functions[expr.name]) {
-				return !!data.functions[expr.name](...processParameters(expr.params, frame, data))
+			if(data.functions[expr.name.value]) {
+				const automata = data.automata[data.automata.length - 1]
+				return !!data.functions[expr.name.value](
+					...processParameters(expr.params, frame, data),
+					{game: data.game, frame, automata, data: Data}
+				)
 			}
 			console.error(`Function ${expr.name} is undefined`)
 			return false
@@ -296,10 +296,14 @@ function checkExpressionForFrame(expr, frame, data) {
 					params.push(val)
 				}
 			}
-			const definition = data.definitions[signature.join("_")]
+			const jsig = signature.join("_")
+			const definition = data.definitions[jsig]
 			//console.log("defs",data.definitions)
 			//console.log("searching signature", signature.join("_"))
 			//console.log("found", definition)
+			if (!definition) {
+				throw new Error(`Definition not found for signature "${jsig}"`)
+			}
 			const scope = scopeFromParams(
 				definition.parameters,
 				params
@@ -337,34 +341,54 @@ function temporalAutomataFactory(succession, data, name) {
 		matched_at: [],
 		first_accepted: null,
 		currentStep: 0,
+		//Assuming no match has -1000 frames
+		inRuleSince: null,
 		name
 	}
 	// returns true if there's a match of the last temporal on that frame
 	machine.feedFrame = (frame, data) => {
 		const thenExpr = machine.temporals[machine.currentStep].then
 		const beforeExpr = machine.temporals[machine.currentStep].before
+		if(!machine.inRuleSince) {
+			machine.inRuleSince = frame.frame
+		}
+		data.automata.push({
+			// exposed properties to user
+			name: machine.name,
+			inRuleSince: machine.inRuleSince
+		})
 		if(beforeExpr && beforeExpr.checkFrame(frame, data)) {
-			//console.log("<", name,">", "machine has triggered 'before' at frame", frame.frame)
+			if (checkDebug(frame.frame)) {
+				console.log("<", name,">", "machine has triggered 'before' at frame", frame.frame, `(${frame.frame +123})`)
+			}
 			machine.currentStep = 0
 			machine.first_accepted = null
+			machine.inRuleSince = frame.frame
 		}
 		if(thenExpr.checkFrame(frame, data)) {
-			//console.log("<", name,">", "machine is advancing to step", machine.currentStep+1, " at frame", frame.frame)
+			if (checkDebug(frame.frame)) {
+				console.log("<", name,">", "machine is advancing to step", machine.currentStep+1, " at frame", frame.frame, `(${frame.frame +123})`)
+			}
 			if (!machine.first_accepted) {
 				machine.first_accepted = frame.frame
 			}
 			machine.currentStep += 1
+			machine.inRuleSince = frame.frame
 			if(machine.currentStep === machine.temporals.length) {
-				//console.log("and its a match")
+				if (checkDebug(frame.frame)) {
+					console.log("and its a match")
+				}
 				machine.accepted_intervals.push(
 					[machine.first_accepted, frame.frame]
 				)
 				machine.first_accepted = null
 				machine.matched_at.push(frame.frame)
 				machine.currentStep = 0
+				data.automata.pop()
 				return true
 			}
 		}
+		data.automata.pop()
 
 		return false
 	}
@@ -384,13 +408,14 @@ function dfaRuleFactory(rule, data) {
 		id: rule.id,
 		isAccepting: rule.isAccepting,
 		conditions: rule.if_expr.conditions.map(c => dfaConditionFactory(c, data)),
-		else: rule.if_expr.else
+		else: rule.if_expr.else,
 	}
 
 	obj.feedFrame = (frame, data) => {
 		const nextState = obj.conditions.find(c => 
 			c.expression.checkFrame(frame, data)
 		)
+		
 		if (nextState) {
 			return nextState.nextStateId
 		}
@@ -409,11 +434,23 @@ function dfaFactory(dfadef, data, name) {
 		rules: rules,
 		accepted_frames: [],
 		currentState: rules[0],
-		name
+		name,
+		//Assuming no match has -1000 frames
+		inRuleSince: null,
 	}
 	// returns true if the next state is accepting
 	dfa.feedFrame = (frame, data) => {
+		if(!dfa.inRuleSince) {
+			dfa.inRuleSince = frame.frame
+		}
+		data.automata.push({
+			// exposed properties to user
+			name: dfa.name,
+			inRuleSince: dfa.inRuleSince,
+			currentRule: dfa.currentState.id
+		})
 		const nextStateId = dfa.currentState.feedFrame(frame, data)
+		data.automata.pop()
 		if (nextStateId) {
 			const nextState = rules.find(r => r.id.text === nextStateId.text)
 			if (!nextState) {
@@ -421,12 +458,17 @@ function dfaFactory(dfadef, data, name) {
 ${nextStateId.text} at ${nextStateId.line}:${nextStateId.col} \
 doesn't exist`)
 			} else {
-				//console.log("<", name,">", "machine moves to state", nextState.id.text)
+				if (checkDebug(frame.frame)) {
+					console.log("<", name,">", "machine moves to state", nextState.id.text, "at frame", frame.frame, `(${frame.frame +123})`)
+				}
+				dfa.inRuleSince = frame.frame
 				dfa.currentState = nextState
 			}
 		}
 		if (dfa.currentState.isAccepting) {
-			//console.log("<", name,">", "is in an accepting state", dfa.currentState.id.text)
+			if (checkDebug(frame.frame)) {
+				console.log("<", name,">", "is in an accepting state", dfa.currentState.id.text, "at frame",`(${frame.frame +123})`)
+			}
 			dfa.accepted_frames.push(frame.frame)
 		}
 
@@ -436,21 +478,20 @@ doesn't exist`)
 	return dfa
 }
 
-function machineFromQuery(query, game, data) {
-	switch(query.content.type) {
+function machineFromDefinition(def, data, name) {
+	switch(def.type) {
 		case "succession": {
 			return temporalAutomataFactory(
-				query.content, 
-				// all checks inherit this data
-				{game, ...data},
-				"root"
+				def, 
+				data,
+				name
 			)
 		}
 		case "dfa": {
 			return dfaFactory(
-				query.content,
-				{game, ...data},
-				"root"
+				def,
+				data,
+				name
 			)
 		}
 	}
@@ -464,26 +505,14 @@ function getFirstOccurrence(data) {
 		const frameKeys = Object.keys(frames)
 			.map(f => parseInt(f))
 			.sort((a, b) => a-b)
-		const rootMachine = machineFromQuery(data.query, game, data)
+		const rootMachine = machineFromDefinition(
+			data.query.content, 
+			{game, ...data}, 
+			"root"
+		)
 		const frame = frameKeys.find(f => 
 			rootMachine.feedFrame(frames[f], {game, ...data})
 		)
-		//console.log(rootMachine)
-		/*
-		for(let i = -10; i < 0; i++){
-			console.log("------",i,"------")
-			console.log("-Falco")
-			console.log({
-				airborne: frames[i].players[0].post.isAirborne,
-				state: frames[i].players[0].post.actionStateId
-			})
-			console.log("-Ganon")
-			console.log({
-				airborne: frames[i].players[1].post.isAirborne,
-				state: frames[i].players[1].post.actionStateId
-			})
-		}
-		*/		
 		return frame
 	}
 }
@@ -509,16 +538,42 @@ function computeIntervals(frames) {
 
 function getFrameIntervals(data) {
 	return (file) => {
-		//console.log("file", file)
 		const game = new SlippiGame(file)
 		const frames = game.getFrames()
 		const frameKeys = Object.keys(frames)
 			.map(f => parseInt(f))
 			.sort((a, b) => a-b)
-		const rootMachine = machineFromQuery(data.query, game, data)
-		frameKeys.forEach(f => 
-			rootMachine.feedFrame(frames[f], {game, ...data})
+		const rootMachine = machineFromDefinition(
+			data.query.content, 
+			{game, ...data},
+			"root"
 		)
+		if(args.inspect || args.debug) {
+			const eqs = "=".repeat(file.length+22)
+			console.log(eqs)
+			console.log("==========",file,"==========")
+			console.log(eqs)
+		}
+		frameKeys.forEach(f => {
+			if(args.inspect) {
+				const parts = args.inspect.split(",")
+				const interval = parts.map(n => parseInt(n))
+				if( interval[0] < f && f < interval[1]) {
+					console.log(`--------- Frame ${f} ---------`)
+					if (!parts[2] || parts[2] == "pre") {
+						console.group(`Pre:`)
+						console.table(frames[f].players.map(p => inspectPre(p)))
+						console.groupEnd()
+					}
+					if (!parts[2] || parts[2] == "post") {
+						console.group(`Post:`)
+						console.table(frames[f].players.map(p => inspectPost(p)))
+						console.groupEnd()
+					}
+				}
+			}
+			rootMachine.feedFrame(frames[f], {game, ...data})
+		})
 		// for now, different for dfa and succession
 		const intervals = rootMachine.accepted_intervals 
 			|| computeIntervals(rootMachine.accepted_frames)
@@ -527,7 +582,7 @@ function getFrameIntervals(data) {
 }
 
 function executeQuery(data) {
-	const files = glob.sync(`${args.path}/**/*.slp`)
+	const files = glob.sync(args.path)
 	if(files.length === 0) {
 		Log.info(`No files found at ${args.path}`)
 		return []
@@ -546,8 +601,8 @@ function executeQuery(data) {
 				.map(tuple => {
 					const intervals = tuple.o.reverse().reduce((pre, curr) =>
 						curr[0] !== curr[1]
-							? `[${curr[0]}, ${curr[1]}],\t${pre}`
-							: `${curr[0]},\t\t${pre}`
+							? `[${curr[0]} (${curr[0]+123}), ${curr[1]} (${curr[1]+123})],\t${pre}`
+							: `${curr[0]} (${curr[0]+123}),\t\t${pre}`
 					, "")
 					return `found occurrence in ${tuple.f} at the following intervals:
 ${intervals}`
@@ -561,8 +616,10 @@ function evaluateDefinition(definition, data) {
 	const signature = definition.signature.reduce((pre, curr) => {
 		switch (curr.type) {
 			case "infix":
+				//TODO: do better? fix in grammar?
+				const typename = curr.rval === "number_val" ? "number" : curr.rval
 				parameters.push(curr.lval)
-				return `${pre}_${curr.rval}`
+				return `${pre}_${typename}`
 			case "literal":
 				return `${pre}_${curr.value}`
 			default:
@@ -571,14 +628,15 @@ function evaluateDefinition(definition, data) {
 		}
 	},"").slice(1)
 	data.definitions[signature] = {
-		machine: temporalAutomataFactory(definition.body, data, signature),
+		machine: machineFromDefinition(definition.body, data, signature),
 		parameters,
 	}
+
 }
 
 function evaluateFunction(f, data) {
 	const fparams = f.params.map(p => p.text)
-	data.functions[f.name] = new Function(...fparams, f.body)
+	data.functions[f.name.value] = new Function(...fparams, f.body.text)
 }
 
 function execute(q, path) {
@@ -586,7 +644,8 @@ function execute(q, path) {
 		query: null,
 		definitions: {},
 		functions: {},
-		scope: []
+		scope: [],
+		automata: []
 	}
 	q.forEach((stmt) => {
 		switch(stmt.type) {
@@ -601,6 +660,7 @@ function execute(q, path) {
 				break;
 		}
 	})
+	//console.log(data)
 	return executeQuery(data)
 }
 
@@ -610,11 +670,13 @@ function execute(q, path) {
 //-syntax highlight
 //-move to typed lang (typescript or rescript)
 //-better error detection and reporting
+//-templating system for definitions
+//-exists vs forall behaviour (when searching for a frame match, 'always' keyword?)
 
 // TODO:
-// - define => sentence, filter, verb, function
-// - time
+// - import std
 // - "someone" literal
 // - aliases for subjects
+// - define => sentence, verb
 // - "from" ("like" could be done with from?)
 // - basic verbs (play, record, copy)

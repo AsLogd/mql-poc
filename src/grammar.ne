@@ -149,15 +149,16 @@ before_expr -> before expression 			{% removeFirst %}
 expression -> 
 	  expression and term _					{% infix %}
 	| expression or term _					{% infix %}
-	| not term _							{% prefix %}
-	| term _								{% takeFirst %}
+	| term _ 								{% takeFirst %}
+
 term ->
-	sentence								{% sentence %}
+	not term _ 								{% prefix %}
+	| sentence								{% sentence %}
 	| function_call							{% takeFirst %}
 	| %lp _ expression _ %rp				{% removeTwo %}
 
 function_call ->
-	%literal %lp param_values %rp			{% func %}
+	%literal %lp param_values:? %rp			{% func %}
 
 sentence ->
 	sentence __ subject 					{% removeSecondAndCat %}

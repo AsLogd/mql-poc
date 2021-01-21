@@ -149,7 +149,7 @@ function attackIdFromName(name) {
 }
 
 function getCurrentCharacters(id, frame, data) {
-	return frame.filter(playerFrame => playerFrame.pre.playerIndex === id)
+	return frame.players.filter(playerFrame => playerFrame.pre.playerIndex === id)
 }
 
 function getPlayerFromName(name, frame, data) {
@@ -216,8 +216,8 @@ function parseValue(value, frame, data) {
 		case "number_val":
 			return {type:"number", val: Number.parseFloat(value.text)}
 		case "port_val": {
-			const portNumber = parseInt(val.slice(1))
-			const val = getPlayer(portNumber)
+			const portNumber = parseInt(value.value.slice(1))
+			const val = getPlayer(portNumber-1, frame, data)
 			if (!val) {
 				console.error("No player at port: ", value.text)
 				return "error"
@@ -240,7 +240,9 @@ function parseValue(value, frame, data) {
 }
 
 function processParameters(params, frame, data) {
-	return params.map(p => parseValue(p, frame, data))
+	return params 
+		? params.map(p => parseValue(p, frame, data))
+		: []
 }
 
 function scopeFromParams(names, values) {
@@ -252,16 +254,19 @@ function scopeFromParams(names, values) {
 }
 
 function checkExpressionForFrame(expr, frame, data) {
+	//console.log("checking", expr)
 	switch(expr.type) {
 		case "infix": {
 			let res = false 
-			if(expr.type.op == "or") {
+			if(expr.op == "or") {
 				res = checkExpressionForFrame(expr.lval, frame, data)
 					|| checkExpressionForFrame(expr.rval, frame, data)
 			} else { // and
 				res = checkExpressionForFrame(expr.lval, frame, data)
 					&& checkExpressionForFrame(expr.rval, frame, data)
 			}
+	//console.log("result", res)
+
 			return res
 		}
 		case "prefix":
@@ -272,7 +277,20 @@ function checkExpressionForFrame(expr, frame, data) {
 				const automata = data.automata[data.automata.length - 1]
 				return !!data.functions[expr.name.value](
 					...processParameters(expr.params, frame, data),
-					{game: data.game, frame, automata, data: Data}
+					{
+						game: data.game, 
+						frame, 
+						automata, 
+						constants: Data,
+						global: {
+							setValue: (name, value) => {
+								data.global[name] = value
+							},
+							getValue: (name) => {
+								return data.global[name]
+							},
+						}
+					}
 				)
 			}
 			console.error(`Function ${expr.name} is undefined`)
@@ -495,9 +513,10 @@ function machineFromDefinition(def, data, name) {
 }
 
 function getFirstOccurrence(data) {
-	return (file) => {
+	return (file, game) => {
+		data.global = {}
 		//console.log("file", file)
-		const game = new SlippiGame(file)
+		//TODO: debug/inspect
 		const frames = game.getFrames()
 		const frameKeys = Object.keys(frames)
 			.map(f => parseInt(f))
@@ -510,11 +529,28 @@ function getFirstOccurrence(data) {
 		const frame = frameKeys.find(f => 
 			rootMachine.feedFrame(frames[f], {game, ...data})
 		)
-		return frame
+
+		return {frame, global: {...data.global}}
 	}
 }
 
+function cleanIntervals(intervals) {
+	const frames = []
+	if(intervals.length === 0) {
+		return []
+	}
+	intervals.forEach(itval => {
+		for(let i = itval[0]; i <= itval[1]; i++) {
+			frames.push(i)
+		}
+	})
+	return computeIntervals(frames)
+}
+
 function computeIntervals(frames) {
+	if(frames.length === 0) {
+		return []
+	}
 	const res = frames.reduce((pre, curr) => {
 		if (curr - pre.last > 1) {
 			pre.intervals.push([pre.start, pre.last])
@@ -529,13 +565,15 @@ function computeIntervals(frames) {
 	})
 	if (res.start !== res.last) {
 		res.intervals.push([res.start, res.last])
+	} else {
+		res.intervals.push([res.start, res.start])
 	}
 	return res.intervals
 }
 
 function getFrameIntervals(data) {
-	return (file) => {
-		const game = new SlippiGame(file)
+	return (file, game) => {
+		data.global = {}
 		const frames = game.getFrames()
 		const frameKeys = Object.keys(frames)
 			.map(f => parseInt(f))
@@ -572,9 +610,10 @@ function getFrameIntervals(data) {
 			rootMachine.feedFrame(frames[f], {game, ...data})
 		})
 		// for now, different for dfa and succession
-		const intervals = rootMachine.accepted_intervals 
-			|| computeIntervals(rootMachine.accepted_frames)
-		return intervals
+		const intervals = rootMachine.accepted_intervals
+			? cleanIntervals(rootMachine.accepted_intervals)
+			: computeIntervals(rootMachine.accepted_frames)
+		return {intervals, global: {...data.global}}
 	}
 }
 
@@ -588,26 +627,34 @@ function executeQuery(data) {
 	switch(data.query.target.text) {
 		case "matches": {
 			const gfo = getFirstOccurrence(data)
-			const fs = files.map(f => ({file:f, first_occurrence: gfo(f)}))
-				.filter(tuple => !!tuple.first_occurrence)
-				//.map(tuple => `found occurrence in ${tuple.f} at frame ${tuple.o}`)
-			result = {target: "matches", files: fs}
+			const fs = files.map(f => {
+				const game = new SlippiGame(f)
+				const res = gfo(f, game)
+				return {game, file:f, first_occurrence: res.frame, global: res.global}
+			})
+			result = {
+				target: "matches", 
+				matches: fs.filter(tuple => 
+					tuple.first_occurrence !== undefined 
+					&& tuple.first_occurrence !== null
+				),
+				files: fs
+			}
+			break
 		}
 		case "frames": {
 			const gi = getFrameIntervals(data)
-			const fs = files.map(f => ({file:f, intervals: gi(f)}))
-				.filter(tuple => tuple.intervals.length > 0)
-				/*
-				.map(tuple => {
-					const intervals = tuple.o.reverse().reduce((pre, curr) =>
-						curr[0] !== curr[1]
-							? `[${curr[0]} (${curr[0]+123}), ${curr[1]} (${curr[1]+123})],\t${pre}`
-							: `${curr[0]} (${curr[0]+123}),\t\t${pre}`
-					, "")
-					return `found occurrence in ${tuple.f} at the following intervals:
-${intervals}`
-				})*/
-			result = {target: "frames", files: fs}
+			const fs = files.map(f => {
+				const game = new SlippiGame(f)
+				const res = gi(f, game)
+				return {game, file:f, intervals: res.intervals, global: res.global}
+			})
+			result = {
+				target: "frames", 
+				matches: fs.filter(tuple => tuple.intervals.length > 0), 
+				files: fs,
+			}
+			break
 		}
 	}
 	if (data.query.verb.type === "function") {
@@ -659,7 +706,8 @@ function execute(q, path) {
 		functions: {},
 		verbs: {},
 		scope: [],
-		automata: []
+		automata: [],
+		global: {}
 	}
 	q.forEach((stmt) => {
 		switch(stmt.type) {
@@ -681,19 +729,19 @@ function execute(q, path) {
 }
 
 //future work:
-//-find cool name (Inspector Batra?)
+//-rewrite and move to typed lang (for web and cli)
+//-find cool name (Anuralogist, Inspector Anura, Peppi)
 //-graphical DFA's
 //-syntax highlight
-//-move to typed lang (typescript or rescript)
 //-better error detection and reporting
 //-better signatures to allow type hierarchy
-//-templating system for definitions
-//-exists vs forall behaviour (when searching for a frame match, 'always' keyword?)
+//-templating/preprocessing system for definitions
 
 // TODO:
+// - "from"
+// - syntax for dfa to mark start of sequence (+> next, -> +next, ->> next)
 // - "someone" literal
-// - allow functions to write to global data
+// - import
+// - create std
 // - aliases for subjects
-// - "from" ("like" could be done with from?)
-// - basic verbs (play, record, copy)
-// - import std
+// - show ast

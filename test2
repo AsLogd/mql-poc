@@ -1,14 +1,14 @@
 function char_is_in_state_interval(c, lb, hb, state) #{
 	const char = c.character
-	const lbId = state.data.stateNames.findIndex(s => s.toLowerCase() === lb.val)
-	const hbId = state.data.stateNames.findIndex(s => s.toLowerCase() === hb.val)
+	const lbId = state.constants.stateNames.findIndex(s => s.toLowerCase() === lb.val)
+	const hbId = state.constants.stateNames.findIndex(s => s.toLowerCase() === hb.val)
 	return lbId <= char.post.actionStateId 
 		&& char.post.actionStateId <= hbId 
 }#
 
 function char_is_in_state(c, name, state) #{
 	const char = c.character
-	const stateId = state.data.stateNames.findIndex(s => s.toLowerCase() === name.val)
+	const stateId = state.constants.stateNames.findIndex(s => s.toLowerCase() === name.val)
 	return char.post.actionStateId === stateId
 }#
 
@@ -24,13 +24,13 @@ sentence c:character is in state:string =
 verb log(results) #{
 	if (results.target === "matches") {
 		console.group("Found occurrences on the following files:")
-		results.forEach(res => 
+		results.matches.forEach(res => 
 			console.log(`-${res.file} at frame ${res.first_occurrence}`)
 		)
 		console.groupEnd()
 	} else {
 		console.group("Found occurrences on the following files:")
-		results.files.forEach(res => {
+		results.matches.forEach(res => {
 			console.group(`-${res.file} at intervals:`)
 			console.log(res.intervals.reverse().reduce((pre, curr) =>
 				curr[0] !== curr[1]
@@ -44,13 +44,16 @@ verb log(results) #{
 	}
 }#
 
-log frames where 	
+sentence c:character is wavedashing =
 	start: 		if "ganon" is in "KneeBend"					-> jmp
 	jmp: 		if "ganon" is in "LandingFallSpecial"		-> wd
-				elseif "ganon" is jumping 					-> jmp
-				elseif "ganon" is dodging 					-> jmp
-				elseif "ganon" is in "KneeBend"				-> jmp
+				elseif "ganon" is jumping 					
+					or "ganon" is dodging 					
+					or "ganon" is in "KneeBend"				-> jmp
 				else 				 						-> start
 	+wd:		if not "ganon" is in "LandingFallSpecial"	-> start
+
+log frames where "ganon" is wavedashing
+
 
 

@@ -1,0 +1,104 @@
+function port_state_interval(p, lb, hb, state) #{
+	const char = p.player.currentCharacters[0]
+	const lbId = state.constants.stateNames.findIndex(s => s.toLowerCase() === lb.val)
+	const hbId = state.constants.stateNames.findIndex(s => s.toLowerCase() === hb.val)
+	return lbId <= char.post.actionStateId 
+		&& char.post.actionStateId <= hbId 
+}#
+
+function time_pass(mu, q, state) #{
+	const dframes = state.frame - state.inRuleSince
+	switch(mu) {
+		case "frames":
+			return dframes > q
+		case "secs":
+			return dframes/60 > q
+	}
+}#
+
+function game_ends(data) #{
+	let lf = data.global.getValue("ge_lf") 
+	if (!lf) {
+		lf = Object.keys(data.game.getFrames())
+			.map(f => parseInt(f))
+			.sort((a,b) => a - b)
+			.slice(-1)[0]
+		data.global.setValue("ge_lf", lf)
+	}
+	return data.frame.frame === lf
+}#
+
+function increment_counter(name, data) #{	
+	const varname = `counter_${name.val}`
+	const current = data.global.getValue(varname) || 0
+	data.global.setValue(varname, current+1)
+	return false
+}#
+
+function is_grounded(s) #{
+	if(s.type === "port") {
+		return !s.player.currentCharacters[0].isAirborne
+	}
+	console.log("is_grounded not defined for type", s.type)
+}#
+
+sentence t:number ticks pass = 
+	time_pass("frames", $t)
+
+sentence count name:string = 
+	increment_counter($name)
+
+sentence c:port is jumping =
+	port_state_interval($c, "JumpF", "JumpAerialB")
+
+sentence c:port jumps from ground =
+	$c is grounded then $c is jumping before 1 ticks pass
+
+sentence c:port is grounded =
+	is_grounded($c)
+
+sentence game ends =
+	game_ends()
+
+verb log(results) #{
+	if (results.target === "matches") {
+		console.group("Found occurrences on the following files:")
+		results.matches.forEach(res => 
+			console.log(`-${res.file} at frame ${res.first_occurrence}`)
+		)
+		console.groupEnd()
+	} else {
+		console.group("Found occurrences on the following files:")
+		results.matches.forEach(res => {
+			console.group(`-${res.file} at intervals:`)
+			console.log(res.intervals.reverse().reduce((pre, curr) =>
+				curr[0] !== curr[1]
+					? `[${curr[0]} (${curr[0]+123}), ${curr[1]} (${curr[1]+123})],\t${pre}`
+					: `${curr[0]} (${curr[0]+123}),\t\t${pre}`
+			, ""))
+			console.groupEnd()
+
+		})
+		console.groupEnd()
+	}
+}#
+
+function same_jumps(data) #{
+	const p1 = data.global.getValue("counter_p1")
+	const p2 = data.global.getValue("counter_p2")
+	return p1 === p2
+}#
+
+verb stat(results) #{
+	results.files.forEach(res => {
+		console.group(`- ${res.file}`)
+		console.table(res.global)
+		console.groupEnd()
+	})
+}#
+
+log matches where 
+	(p1 jumps from ground and count "p1")
+	or (p2 jumps from ground and count "p2")
+	or (game ends and not same_jumps())
+	

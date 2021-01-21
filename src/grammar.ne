@@ -7,6 +7,7 @@ const keywords = [
 	"frames",
 	// Keywords
 	"where",
+	"from",
 	"and",
 	"or",
 	"not",
@@ -37,7 +38,8 @@ const keywordsMap = Object.fromEntries(
 let lexer = moo.compile({
 	ws: 		{match: /[ \t\n\r]+/, lineBreaks: true},
 	block: 		{match: /\#\{[^]*?\}\#/, lineBreaks: true},
-	string_val: /"(?:\\["bfnrt\/\\]|\\u[a-fA-F0-9]{4}|[^"\\])*"/,
+	obj_val: 	/"(?:\\["bfnrt\/\\]|\\u[a-fA-F0-9]{4}|[^"\\])*"/,
+	string_val: /'(?:\\['bfnrt\/\\]|\\u[a-fA-F0-9]{4}|[^'\\])*'/,
 	port_val:	/p[1-4]/,
 	number_val: /[0-9]+(?:\.[0-9]+)?/,
 	literal: 	{match: /[a-zA-Z_]+/, type: moo.keywords(keywordsMap)},
@@ -69,7 +71,8 @@ const takeNth 		= (n) => (vals)			=> vals[n]
 const catWithRest 	= ([r, i])				=> [...(r||[]), i]
 const removeSecond 	= ([a, _, b])			=> [a, b]
 const removeSecondAndCat 	= ([a, _, b])	=> [...(a||[]), b]
-const query 		= ([verb, trgt, _, con])=> ({type: "query",target: trgt, content: con, verb})
+const query 		= ([verb, [t,c], from]) => ({type: "query", target: t, content: c, verb, from})
+const fromExpr 		= ([_, [t,c], from]) 	=> ({type: "from", target: t, content: c, from})
 const succession 	= ([expr, succ])		=> ({type: "succession", temporals: [expr, ...succ]})
 const temporal 		= ([_, then, before])	=> ({type: "temporal", then, before})
 const specialTemporal = ([then, before])	=> ({type: "temporal", then, before})
@@ -121,7 +124,12 @@ param_def -> %literal %co type				{% infix %}
 body -> %eq _ query_content					{% removeTwo %}
 
 query -> 
-	verb_call target where query_content	{% query %}
+	verb_call where_expr from_expr:? 		{% query %}
+
+where_expr -> target where query_content 	{% removeSecond %}
+
+from_expr -> 
+	from where_expr (__ from_expr):? 		{% fromExpr %}
 
 verb_call ->
 	%literal __ 							{% takeFirst %}
@@ -172,16 +180,19 @@ param_values ->
 	| subject 								{% identity %}
 
 
-not			 -> %not __ 					{% removeFirst %}
+not			 -> %not __ 					{% takeFirst %}
 and			 -> __ %and __					{% removeFirst %}
 or			 -> __ %or __					{% removeFirst %}
 where		 -> __ %where __				{% removeFirst %}
 then		 -> __ %then __					{% removeFirst %}
 before		 -> __ %before __				{% removeFirst %}
 
+from		 -> %from __					{% takeFirst %}
+
 param_ref -> %dol %literal					{% paramRef %}
 subject -> 
 	%someone 								{% takeFirst %}
+	| %obj_val								{% takeFirst %}
 	| %string_val							{% takeFirst %}
 	| %number_val							{% takeFirst %}
 	| %port_val								{% takeFirst %}

@@ -204,14 +204,20 @@ function parseValue(value, frame, data) {
 			return "someone"
 		case "match":
 			return data.settings
-		case "string_val": {
+		case "obj_val": {
 			const content = value.text.slice(1, -1).toLowerCase()
 			const val = getCharacter(content, frame, data) 
 				|| getAttack(content)
 				|| getPlayerFromName(content, frame, data)
-				|| {type: "string", val: content}
-
+				|| {type: "unknown", val: content}
+			if (args.debug && val.type === "unknown") {
+				console.warn("Couldn't find object ", content)
+			}
 			return val
+		}
+		case "string_val": {
+			const content = value.text.slice(1, -1).toLowerCase()
+			return {type: "string", val: content}
 		}
 		case "number_val":
 			return {type:"number", val: Number.parseFloat(value.text)}
@@ -235,6 +241,9 @@ function parseValue(value, frame, data) {
 				return "error"
 			}
 			return scope[value.name.text]
+		}
+		default: {
+			return {type: "unknown"}
 		}
 	}
 }
@@ -304,7 +313,7 @@ function checkExpressionForFrame(expr, frame, data) {
 					signature.push(word.text)
 				} else {
 					const val = parseValue(word, frame, data)
-					if (val === "unknown") {
+					if (val.type === "unknown") {
 						return false
 					}
 					signature.push(val.type || val)
@@ -512,7 +521,7 @@ function machineFromDefinition(def, data, name) {
 	}
 }
 
-function getFirstOccurrence(data) {
+function getFirstOccurrence(query, data) {
 	return (file, game) => {
 		data.global = {}
 		//console.log("file", file)
@@ -522,7 +531,7 @@ function getFirstOccurrence(data) {
 			.map(f => parseInt(f))
 			.sort((a, b) => a-b)
 		const rootMachine = machineFromDefinition(
-			data.query.content, 
+			query.content, 
 			{game, ...data}, 
 			"root"
 		)
@@ -571,7 +580,7 @@ function computeIntervals(frames) {
 	return res.intervals
 }
 
-function getFrameIntervals(data) {
+function getFrameIntervals(query, data) {
 	return (file, game) => {
 		data.global = {}
 		const frames = game.getFrames()
@@ -579,7 +588,7 @@ function getFrameIntervals(data) {
 			.map(f => parseInt(f))
 			.sort((a, b) => a-b)
 		const rootMachine = machineFromDefinition(
-			data.query.content, 
+			query.content, 
 			{game, ...data},
 			"root"
 		)
@@ -617,22 +626,21 @@ function getFrameIntervals(data) {
 	}
 }
 
-function executeQuery(data) {
-	const files = glob.sync(args.path)
-	if(files.length === 0) {
-		Log.info(`No files found at ${args.path}`)
-		return []
+function getQueryResult(query, data, files) {
+	let inputFiles = files
+	if (query.from) {
+		const fromResult = getQueryResult(query.from, data, files)
+		inputFiles = fromResult.matches.map(file => file.file)
 	}
-	let result
-	switch(data.query.target.text) {
+	switch(query.target.text) {
 		case "matches": {
-			const gfo = getFirstOccurrence(data)
-			const fs = files.map(f => {
+			const gfo = getFirstOccurrence(query, data)
+			const fs = inputFiles.map(f => {
 				const game = new SlippiGame(f)
 				const res = gfo(f, game)
 				return {game, file:f, first_occurrence: res.frame, global: res.global}
 			})
-			result = {
+			return {
 				target: "matches", 
 				matches: fs.filter(tuple => 
 					tuple.first_occurrence !== undefined 
@@ -640,25 +648,36 @@ function executeQuery(data) {
 				),
 				files: fs
 			}
-			break
 		}
 		case "frames": {
-			const gi = getFrameIntervals(data)
-			const fs = files.map(f => {
+			const gi = getFrameIntervals(query, data)
+			const fs = inputFiles.map(f => {
 				const game = new SlippiGame(f)
 				const res = gi(f, game)
 				return {game, file:f, intervals: res.intervals, global: res.global}
 			})
-			result = {
+			return {
 				target: "frames", 
 				matches: fs.filter(tuple => tuple.intervals.length > 0), 
 				files: fs,
 			}
-			break
 		}
 	}
+}
+
+function executeQuery(data) {
+	const files = glob.sync(args.path)
+	if(files.length === 0) {
+		Log.info(`No files found at ${args.path}`)
+		return []
+	}
+	const result = getQueryResult(data.query, data, files)
+	
 	if (data.query.verb.type === "function") {
-		data.verbs[data.query.verb.name](result, ...processParameters(data.query.verb.params))
+		data.verbs[data.query.verb.name](
+			result, 
+			...processParameters(data.query.verb.params)
+		)
 	} else {
 		data.verbs[data.query.verb.text](result)
 	}
@@ -744,4 +763,5 @@ function execute(q, path) {
 // - import
 // - create std
 // - aliases for subjects
-// - show ast
+// - show ast (update)
+// - allos objects as params on verbs

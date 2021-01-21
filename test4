@@ -1,0 +1,66 @@
+function char_is_in_state_interval(c, lb, hb, state) #{
+	const char = c.character
+	const lbId = state.constants.stateNames.findIndex(s => s.toLowerCase() === lb.val)
+	const hbId = state.constants.stateNames.findIndex(s => s.toLowerCase() === hb.val)
+	return lbId <= char.post.actionStateId 
+		&& char.post.actionStateId <= hbId 
+}#
+
+function char_is_in_state(c, name, state) #{
+	const char = c.character
+	const stateId = state.constants.stateNames.findIndex(s => s.toLowerCase() === name.val)
+	return char.post.actionStateId === stateId
+}#
+
+function char_plays(c) #{
+	return true
+}#
+
+sentence c:character is jumping = 
+	char_is_in_state_interval($c, "JumpF", "JumpAerialB")
+
+sentence c:character is dodging = 
+	char_is_in_state_interval($c, "EscapeF", "EscapeAir")
+
+sentence c:character is in state:string = 
+	char_is_in_state($c, $state)
+
+sentence c:character is wavedashing =
+	start: 		if "ganon" is in 'KneeBend'					-> jmp
+	jmp: 		if "ganon" is in 'LandingFallSpecial'		-> wd
+				elseif "ganon" is jumping 					
+					or "ganon" is dodging 					
+					or "ganon" is in 'KneeBend'				-> jmp
+				else 				 						-> start
+	+wd:		if not "ganon" is in 'LandingFallSpecial'	-> start
+
+
+sentence a:character plays against b:character =
+	char_plays($a) and char_plays($b)
+
+verb log(results) #{
+	if (results.target === "matches") {
+		console.group("Found occurrences on the following files:")
+		results.matches.forEach(res => 
+			console.log(`-${res.file} at frame ${res.first_occurrence}`)
+		)
+		console.groupEnd()
+	} else {
+		console.group("Found occurrences on the following files:")
+		results.matches.forEach(res => {
+			console.group(`-${res.file} at intervals:`)
+			console.log(res.intervals.reverse().reduce((pre, curr) =>
+				curr[0] !== curr[1]
+					? `[${curr[0]} (${curr[0]+123}), ${curr[1]} (${curr[1]+123})],\t${pre}`
+					: `${curr[0]} (${curr[0]+123}),\t\t${pre}`
+			, ""))
+			console.groupEnd()
+
+		})
+		console.groupEnd()
+	}
+}#
+
+log frames where "ganon" is wavedashing 
+	from matches where "Falco" plays against "ganon"
+	

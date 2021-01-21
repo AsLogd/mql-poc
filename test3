@@ -42,6 +42,10 @@ function is_grounded(s) #{
 	console.log("is_grounded not defined for type", s.type)
 }#
 
+function char_plays(s) #{
+	return true
+}#
+
 sentence t:number ticks pass = 
 	time_pass("frames", $t)
 
@@ -51,7 +55,7 @@ sentence count name:string =
 sentence c:port is jumping =
 	port_state_interval($c, "JumpF", "JumpAerialB")
 
-sentence c:port jumps from ground =
+sentence c:port jumps =
 	$c is grounded then $c is jumping before 1 ticks pass
 
 sentence c:port is grounded =
@@ -59,6 +63,9 @@ sentence c:port is grounded =
 
 sentence game ends =
 	game_ends()
+
+sentence c:character plays =
+	char_plays($c)
 
 verb log(results) #{
 	if (results.target === "matches") {
@@ -98,7 +105,7 @@ verb stat(results) #{
 }#
 
 log matches where 
-	(p1 jumps from ground and count "p1")
-	or (p2 jumps from ground and count "p2")
+	(p1 jumps and count 'p1')
+	or (p2 jumps and count 'p2')
 	or (game ends and not same_jumps())
 	

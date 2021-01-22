@@ -262,6 +262,7 @@ function scopeFromParams(names, values) {
 	return scope
 }
 
+//TODO this needs frames
 function checkExpressionForFrame(expr, frame, data) {
 	//console.log("checking", expr)
 	switch(expr.type) {
@@ -295,6 +296,7 @@ function checkExpressionForFrame(expr, frame, data) {
 							setValue: (name, value) => {
 								data.global[name] = value
 							},
+							//TODO: only for 'effect's
 							getValue: (name) => {
 								return data.global[name]
 							},
@@ -333,7 +335,7 @@ function checkExpressionForFrame(expr, frame, data) {
 				params
 			)
 			data.scope.push(scope)
-			const res = definition.machine.feedFrame(frame, data)
+			const res = definition.machine.feedFrame(frame.frame, data, data.game.getFrames())
 			data.scope.pop()
 			return res
 		}
@@ -365,48 +367,47 @@ function temporalAutomataFactory(succession, data, name) {
 		matched_at: [],
 		first_accepted: null,
 		currentStep: 0,
-		//Assuming no match has -1000 frames
 		inRuleSince: null,
 		name
 	}
 	// returns true if there's a match of the last temporal on that frame
-	machine.feedFrame = (frame, data) => {
+	machine.feedFrame = (fi, data, frames) => {
 		const thenExpr = machine.temporals[machine.currentStep].then
 		const beforeExpr = machine.temporals[machine.currentStep].before
 		if(!machine.inRuleSince) {
-			machine.inRuleSince = frame.frame
+			machine.inRuleSince = fi
 		}
 		data.automata.push({
 			// exposed properties to user
 			name: machine.name,
 			inRuleSince: machine.inRuleSince
 		})
-		if(beforeExpr && beforeExpr.checkFrame(frame, data)) {
-			if (checkDebug(frame.frame)) {
-				console.log("<", name,">", "machine has triggered 'before' at frame", frame.frame, `(${frame.frame +123})`)
+		if(beforeExpr && beforeExpr.checkFrame(frames[fi], data)) {
+			if (checkDebug(fi)) {
+				console.log("<", name,">", "machine has triggered 'before' at frame", fi, `(${fi +123})`)
 			}
 			machine.currentStep = 0
 			machine.first_accepted = null
-			machine.inRuleSince = frame.frame
+			machine.inRuleSince = fi
 		}
-		if(thenExpr.checkFrame(frame, data)) {
-			if (checkDebug(frame.frame)) {
-				console.log("<", name,">", "machine is advancing to step", machine.currentStep+1, " at frame", frame.frame, `(${frame.frame +123})`)
+		if(thenExpr.checkFrame(frames[fi], data)) {
+			if (checkDebug(fi)) {
+				console.log("<", name,">", "machine is advancing to step", machine.currentStep+1, " at frame", fi, `(${fi +123})`)
 			}
 			if (!machine.first_accepted) {
-				machine.first_accepted = frame.frame
+				machine.first_accepted = fi
 			}
 			machine.currentStep += 1
-			machine.inRuleSince = frame.frame
+			machine.inRuleSince = fi
 			if(machine.currentStep === machine.temporals.length) {
-				if (checkDebug(frame.frame)) {
+				if (checkDebug(fi)) {
 					console.log("and its a match")
 				}
 				machine.accepted_intervals.push(
-					[machine.first_accepted, frame.frame]
+					[machine.first_accepted, fi]
 				)
 				machine.first_accepted = null
-				machine.matched_at.push(frame.frame)
+				machine.matched_at.push(fi)
 				machine.currentStep = 0
 				data.automata.pop()
 				return true
@@ -423,7 +424,8 @@ function temporalAutomataFactory(succession, data, name) {
 function dfaConditionFactory(cond, data) {
 	return {
 		expression: expressionFactory(cond.expression, data),
-		nextStateId: cond.result
+		nextId: cond.result.nextId,
+		lookahead: cond.result.lookahead
 	}
 }
 
@@ -435,13 +437,13 @@ function dfaRuleFactory(rule, data) {
 		else: rule.if_expr.else,
 	}
 
-	obj.feedFrame = (frame, data) => {
+	obj.feedFrame = (fi, data, frames) => {
 		const nextState = obj.conditions.find(c => 
-			c.expression.checkFrame(frame, data)
+			c.expression.checkFrame(frames[fi], data)
 		)
-		
+
 		if (nextState) {
-			return nextState.nextStateId
+			return nextState
 		}
 		if (obj.else) {
 			return obj.else
@@ -457,46 +459,110 @@ function dfaFactory(dfadef, data, name) {
 	const dfa = {
 		rules: rules,
 		accepted_frames: [],
-		currentState: rules[0],
+		currentStateIndex: 0,
 		name,
-		//Assuming no match has -1000 frames
 		inRuleSince: null,
+		lastLookaheadValue: false,
+		cachedResults: {},
+		lookingAhead: false
 	}
+	dfa.clone = () => {
+		const newdfa = dfaFactory(dfadef, data, "__"+name)
+		newdfa.currentStateIndex = dfa.currentStateIndex
+		newdfa.accepted_frames = [...dfa.accepted_frames]
+		newdfa.inRuleSince = dfa.inRuleSince
+		newdfa.lastLookaheadValue = dfa.lastLookaheadValue
+		newdfa.cachedResults = {...dfa.cachedResults}
+		return newdfa
+	}
+	// TODO pls refactor
 	// returns true if the next state is accepting
-	dfa.feedFrame = (frame, data) => {
-		if(!dfa.inRuleSince) {
-			dfa.inRuleSince = frame.frame
+	dfa.feedFrame = (fi, data, frames) => {
+		if (dfa.cachedResults[fi] !== undefined) {
+			if (checkDebug(fi)) {
+				console.log("<", name,">", "returns a cached result at frame", fi, `(${fi +123}):`, dfa.cachedResults[fi])
+			}
+			if (dfa.cachedResults[fi]) {
+				dfa.accepted_frames.push(fi)
+			}
+			return dfa.cachedResults[fi]
 		}
+		if(!dfa.inRuleSince) {
+			dfa.inRuleSince = fi
+		}
+		let currentState = dfa.rules[dfa.currentStateIndex]
 		data.automata.push({
 			// exposed properties to user
 			name: dfa.name,
 			inRuleSince: dfa.inRuleSince,
-			currentRule: dfa.currentState.id
+			currentRule: currentState.id
 		})
-		const nextStateId = dfa.currentState.feedFrame(frame, data)
+		const ns = currentState.feedFrame(fi, data, frames)
 		data.automata.pop()
-		if (nextStateId) {
-			const nextState = rules.find(r => r.id.text === nextStateId.text)
+		let lookaheadAccept = null
+		if (ns) {
+			const nextStateIndex = rules.findIndex(r => r.id.text === ns.nextId.text)
+			const nextState = dfa.rules[nextStateIndex]
 			if (!nextState) {
 				console.info(`State \
 ${nextStateId.text} at ${nextStateId.line}:${nextStateId.col} \
 doesn't exist`)
-			} else {
-				if (checkDebug(frame.frame)) {
-					console.log("<", name,">", "machine moves to state", nextState.id.text, "at frame", frame.frame, `(${frame.frame +123})`)
+				return false
+			} 
+			if (checkDebug(fi)) {
+				console.log("<", name,">", "currently at state",currentState.id.text," moves to state", nextState.id.text, "at frame", fi, `(${fi +123})`)
+			}
+			if(!dfa.lookingAhead && !nextState.isAccepting){
+				if (ns.lookahead) {
+					if (checkDebug(fi)) {
+						console.log("<", name,">", "is performing a lookahead search at frame", fi, `(${fi +123})`, "=======")
+					}
+					dfa.lastLookaheadValue = true
+					const ladfa = dfa.clone()
+					ladfa.lookingAhead = true
+					lookaheadAccept = false
+					let acceptFrame
+					let i = fi+1
+					// while a frame exists, didnt find an accept state and didnt transition with arrow
+					while(frames[i] && !lookaheadAccept && ladfa.lastLookaheadValue) {
+						lookaheadAccept = ladfa.feedFrame(i, data, frames)
+						i += 1;
+					}
+					if (checkDebug(fi)) {
+						console.log("<", name,">", " the lookahead finished (",lookaheadAccept,"). Resuming at frame ", fi, `(${fi +123})`, "-------")
+					}
+					// infer result for frames
+					for (let j = fi+1; j < i-1; j++) {
+						dfa.cachedResults[j] = lookaheadAccept
+					}
+				} else {
+					dfa.lastLookaheadValue = false
 				}
-				dfa.inRuleSince = frame.frame
-				dfa.currentState = nextState
+			} else {
+				if(checkDebug(fi)) {
+					inspectFrame(fi, frames)
+				}
+				dfa.lastLookaheadValue = ns.lookahead
+			}			
+			dfa.inRuleSince = fi
+			dfa.currentStateIndex = nextStateIndex
+		}
+		currentState = dfa.rules[dfa.currentStateIndex]
+		if (checkDebug(fi)) {
+			if (currentState.isAccepting) {
+				console.log("<", name,">", "is in an accepting state", currentState.id.text, "at frame",fi,`(${fi +123})`)
+			}
+			if (lookaheadAccept) {
+				console.log("<", name,">", "currently at state", currentState.id.text, ", will be accepted because it leads to a match in the future")
 			}
 		}
-		if (dfa.currentState.isAccepting) {
-			if (checkDebug(frame.frame)) {
-				console.log("<", name,">", "is in an accepting state", dfa.currentState.id.text, "at frame",`(${frame.frame +123})`)
-			}
-			dfa.accepted_frames.push(frame.frame)
+		// I assume its absurd to do lookahead in an accepting state
+		const accept = lookaheadAccept || currentState.isAccepting
+		if (accept) {
+			dfa.accepted_frames.push(fi)
 		}
 
-		return dfa.currentState.isAccepting
+		return accept
 	}
 
 	return dfa
@@ -536,7 +602,7 @@ function getFirstOccurrence(query, data) {
 			"root"
 		)
 		const frame = frameKeys.find(f => 
-			rootMachine.feedFrame(frames[f], {game, ...data})
+			rootMachine.feedFrame(f, {game, ...data}, frames)
 		)
 
 		return {frame, global: {...data.global}}
@@ -580,6 +646,24 @@ function computeIntervals(frames) {
 	return res.intervals
 }
 
+function inspectFrame(f, frames) {
+	const parts = args.inspect.split(",")
+	const interval = parts.map(n => parseInt(n))
+	if( interval[0] < f && f < interval[1]) {
+		console.log(`--------- Frame ${f} ---------`)
+		if (!parts[2] || parts[2] == "pre") {
+			console.group(`Pre:`)
+			console.table(frames[f].players.map(p => inspectPre(p)))
+			console.groupEnd()
+		}
+		if (!parts[2] || parts[2] == "post") {
+			console.group(`Post:`)
+			console.table(frames[f].players.map(p => inspectPost(p)))
+			console.groupEnd()
+		}
+	}
+}
+
 function getFrameIntervals(query, data) {
 	return (file, game) => {
 		data.global = {}
@@ -600,23 +684,9 @@ function getFrameIntervals(query, data) {
 		}
 		frameKeys.forEach(f => {
 			if(args.inspect) {
-				const parts = args.inspect.split(",")
-				const interval = parts.map(n => parseInt(n))
-				if( interval[0] < f && f < interval[1]) {
-					console.log(`--------- Frame ${f} ---------`)
-					if (!parts[2] || parts[2] == "pre") {
-						console.group(`Pre:`)
-						console.table(frames[f].players.map(p => inspectPre(p)))
-						console.groupEnd()
-					}
-					if (!parts[2] || parts[2] == "post") {
-						console.group(`Post:`)
-						console.table(frames[f].players.map(p => inspectPost(p)))
-						console.groupEnd()
-					}
-				}
+				inspectFrame(f, frames)
 			}
-			rootMachine.feedFrame(frames[f], {game, ...data})
+			rootMachine.feedFrame(f, {game, ...data}, frames)
 		})
 		// for now, different for dfa and succession
 		const intervals = rootMachine.accepted_intervals
@@ -672,11 +742,15 @@ function executeQuery(data) {
 		return []
 	}
 	const result = getQueryResult(data.query, data, files)
-	
+
 	if (data.query.verb.type === "function") {
 		data.verbs[data.query.verb.name](
 			result, 
-			...processParameters(data.query.verb.params)
+			...processParameters(
+				data.query.verb.params, 
+				data.game.getFrames()[0], 
+				data
+			)
 		)
 	} else {
 		data.verbs[data.query.verb.text](result)
@@ -749,6 +823,7 @@ function execute(q, path) {
 
 //future work:
 //-rewrite and move to typed lang (for web and cli)
+//-everything is nfas
 //-find cool name (Anuralogist, Inspector Anura, Peppi)
 //-graphical DFA's
 //-syntax highlight
@@ -757,11 +832,11 @@ function execute(q, path) {
 //-templating/preprocessing system for definitions
 
 // TODO:
-// - "from"
-// - syntax for dfa to mark start of sequence (+> next, -> +next, ->> next)
 // - "someone" literal
 // - import
 // - create std
 // - aliases for subjects
 // - show ast (update)
+// - make verbs definitions with one function call
 // - allos objects as params on verbs
+// - basics verbs (record, copy)

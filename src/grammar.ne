@@ -46,6 +46,7 @@ let lexer = moo.compile({
 	lp:			"(",
 	rp:			")",
 	arrow:		"->",
+	sparrow:	"+>",
 	co: 		":",
 	eq: 		"=",
 	dol: 		"$",
@@ -89,6 +90,7 @@ const addRule		= ([dfa, _, rule]) 		=> ({type: "dfa", rules: [...dfa.rules, rule
 const dfaRule 		= ([t, _, id, __, ife]) => ({type: "dfa_rule", isAccepting: !!t, id, if_expr: ife})
 const ifExpr 		= ([_, cont, elifs, el])=> ({type: "if_expr", conditions: [cont, ...elifs], else: el})
 const ifContent 	= ([_, expr, res]) 		=> ({type: "if_content", expression: expr, result: res})
+const ifResult  	= (la) => (res) 		=> ({type: "if_result", lookahead: la, nextId: takeNth(3)(res)})
 %} 
 
 @lexer lexer
@@ -147,7 +149,9 @@ if_expr -> %if if_content else_if:* else:?  {% ifExpr %}
 else_if -> %elseif if_content				{% takeNth(1) %}
 else -> %else if_result						{% takeNth(1) %}
 if_content -> __ expression if_result		{% ifContent %}
-if_result -> __ %arrow _ %literal _ 		{% takeNth(3) %}
+if_result -> 
+	  __ %arrow _ %literal _ 				{% ifResult(false) %}
+	| __ %sparrow _ %literal _ 				{% ifResult(true) %}
 
 succession -> special_temporal temporal:* 	{% succession %}
 temporal -> then expression before_expr:? 	{% temporal %}

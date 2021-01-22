@@ -17,20 +17,20 @@ function char_plays(c) #{
 }#
 
 sentence c:character is jumping = 
-	char_is_in_state_interval($c, "JumpF", "JumpAerialB")
+	char_is_in_state_interval($c, 'JumpF', 'JumpAerialB')
 
 sentence c:character is dodging = 
-	char_is_in_state_interval($c, "EscapeF", "EscapeAir")
+	char_is_in_state_interval($c, 'EscapeF', 'EscapeAir')
 
 sentence c:character is in state:string = 
 	char_is_in_state($c, $state)
 
 sentence c:character is wavedashing =
-	start: 		if "ganon" is in 'KneeBend'					-> jmp
-	jmp: 		if "ganon" is in 'LandingFallSpecial'		-> wd
+	start: 		if "ganon" is in 'KneeBend'					+> jmp
+	jmp: 		if "ganon" is in 'LandingFallSpecial'		+> wd
 				elseif "ganon" is jumping 					
 					or "ganon" is dodging 					
-					or "ganon" is in 'KneeBend'				-> jmp
+					or "ganon" is in 'KneeBend'				+> jmp
 				else 				 						-> start
 	+wd:		if not "ganon" is in 'LandingFallSpecial'	-> start
 
@@ -62,5 +62,4 @@ verb log(results) #{
 }#
 
 log frames where "ganon" is wavedashing 
-	from matches where "Falco" plays against "ganon"
-	
+	from matches where "Roy" plays against "ganon"

@@ -201,7 +201,10 @@ function parseValue(value, frame, data) {
 
 	switch(value.type) {
 		case "someone":
-			return "someone"
+			return {type:"someone", characters: frame.players.map(p => {
+				type:"character"
+				character: p
+			})}
 		case "match":
 			return data.settings
 		case "obj_val": {
@@ -226,19 +229,19 @@ function parseValue(value, frame, data) {
 			const val = getPlayer(portNumber-1, frame, data)
 			if (!val) {
 				console.error("No player at port: ", value.text)
-				return "error"
+				return {type:"error"}
 			}
 			return {type:"port", portNumber, player: val}
 		}
 		case "ref": {
 			if(data.scope.length === 0) {
 				console.error("Undefined scope for: ", value.name.text)
-				return "error"
+				return {type:"error"}
 			}
 			const scope = data.scope[data.scope.length - 1]
 			if(!scope[value.name.text]) {
 				console.error("Undefined reference: ", value.name.text)
-				return "error"
+				return {type:"error"}
 			}
 			return scope[value.name.text]
 		}
@@ -248,10 +251,28 @@ function parseValue(value, frame, data) {
 	}
 }
 
+function paramPermutations(valarrays) {
+	valarrays[0] = valarrays[0].map(v => [v])
+	return valarrays.reduce((curr, pre) => {
+		const res = []
+		for (const cv of curr) {
+			for (const pv of pre) {
+				res.push([...cv, pv])
+			}
+		}
+		return res
+	})
+}
+
+
 function processParameters(params, frame, data) {
-	return params 
-		? params.map(p => parseValue(p, frame, data))
-		: []
+	const paramValueArrays = params.map(p => {
+		const value = parseValue(p, frame, data)
+		return value.type === "someone"
+			? value.characters 
+			: [value]
+	})
+	return paramPermutations(paramValueArrays)
 }
 
 function scopeFromParams(names, values) {
@@ -262,10 +283,11 @@ function scopeFromParams(names, values) {
 	return scope
 }
 
-//TODO this needs frames
 function checkExpressionForFrame(expr, frame, data) {
-	//console.log("checking", expr)
 	switch(expr.type) {
+		case "boolean": {
+			return expr.value.text === "true"
+		}
 		case "infix": {
 			let res = false 
 			if(expr.op == "or") {
@@ -275,7 +297,6 @@ function checkExpressionForFrame(expr, frame, data) {
 				res = checkExpressionForFrame(expr.lval, frame, data)
 					&& checkExpressionForFrame(expr.rval, frame, data)
 			}
-	//console.log("result", res)
 
 			return res
 		}
@@ -283,29 +304,34 @@ function checkExpressionForFrame(expr, frame, data) {
 			// Only not for now
 			return !checkExpressionForFrame(expr.rval, frame, data)
 		case "function":{
-			if(data.functions[expr.name.value]) {
-				const automata = data.automata[data.automata.length - 1]
-				return !!data.functions[expr.name.value](
-					...processParameters(expr.params, frame, data),
-					{
-						game: data.game, 
-						frame, 
-						automata, 
-						constants: Data,
-						global: {
-							setValue: (name, value) => {
-								data.global[name] = value
-							},
-							//TODO: only for 'effect's
-							getValue: (name) => {
-								return data.global[name]
-							},
-						}
-					}
-				)
+			console.log("nawf ", frame.frame, scope)
+
+			if(!data.functions[expr.name.value]) {
+				console.error(`Function ${expr.name} is undefined`)
+				return false
 			}
-			console.error(`Function ${expr.name} is undefined`)
-			return false
+
+			const automata = data.automata[data.automata.length - 1]
+			const combins = processParameters(expr.params, frame, data)
+			const state = {
+				game: data.game, 
+				frame, 
+				automata, 
+				constants: Data,
+				global: {
+					setValue: (name, value) => {
+						data.global[name] = value
+					},
+					//TODO: only for 'effect's
+					getValue: (name) => {
+						return data.global[name]
+					},
+				}
+			}
+
+			return combins.some(combination => 
+				!!data.functions[expr.name.value](...combination,state)
+			)
 		}
 		case "sentence": {
 			const signature = []
@@ -314,14 +340,21 @@ function checkExpressionForFrame(expr, frame, data) {
 				if (word.type === "literal") {
 					signature.push(word.text)
 				} else {
-					const val = parseValue(word, frame, data)
+					let val = parseValue(word, frame, data)
 					if (val.type === "unknown") {
 						return false
 					}
-					signature.push(val.type || val)
+					if (val.type === "someone") {
+						val = val.characters
+						signature.push("character")
+					} else {
+						signature.push(val.type)
+						val = [val]
+					}
 					params.push(val)
 				}
 			}
+			const perms = paramPermutations(params)
 			const jsig = signature.join("_")
 			const definition = data.sentences[jsig]
 			//console.log("defs",data.definitions)
@@ -330,14 +363,35 @@ function checkExpressionForFrame(expr, frame, data) {
 			if (!definition) {
 				throw new Error(`Definition not found for signature "${jsig}"`)
 			}
-			const scope = scopeFromParams(
-				definition.parameters,
-				params
-			)
-			data.scope.push(scope)
-			const res = definition.machine.feedFrame(frame.frame, data, data.game.getFrames())
-			data.scope.pop()
-			return res
+			if(perms.lenght > 1) {
+				return perms.some(p => {
+					const scope = scopeFromParams(
+						definition.parameters,
+						p
+					)
+					data.scope.push(scope)
+					const cloned = definition.machine.clone()
+					const res = cloned.feedFrame(frame.frame, data, data.game.getFrames())
+					if (res) {
+						// side effect
+						definition.machine.feedFrame(frame.frame, data, data.game.getFrames())
+					}
+					data.scope.pop()
+					return res
+
+				})
+			} else {
+				const scope = scopeFromParams(
+					definition.parameters,
+					perms[0]
+				)
+				data.scope.push(scope)
+				const res = definition.machine.feedFrame(
+					frame.frame, data, data.game.getFrames()
+				)
+				data.scope.pop()
+				return res
+			}
 		}
 	}
 }
@@ -353,73 +407,68 @@ function expressionFactory(expression, data) {
 	return obj
 }
 
-function temporalFactory(temporal, data) {
-	return {
-		then: expressionFactory(temporal.then, data),
-		before: temporal.before && expressionFactory(temporal.before, data)
-	}
+function dfaFromSuccession(succession, data, name) {
+	// add dummy temporal at the end so the map works
+	const rules = succession.temporals.map((t, i) => 
+		dfaRuleFromTemporal(
+			t, 
+			i, 
+			false,
+			data
+		)
+	)
+	rules.push(dfaRuleFromTemporal(
+		{}, 
+		succession.temporals.length,
+		true,
+		data
+	))
+	return dfaFactory({rules}, data, name)
 }
 
-function temporalAutomataFactory(succession, data, name) {
-	const machine = {
-		temporals: succession.temporals.map((t) => temporalFactory(t, data)),
-		accepted_intervals: [],
-		matched_at: [],
-		first_accepted: null,
-		currentStep: 0,
-		inRuleSince: null,
-		name
-	}
-	// returns true if there's a match of the last temporal on that frame
-	machine.feedFrame = (fi, data, frames) => {
-		const thenExpr = machine.temporals[machine.currentStep].then
-		const beforeExpr = machine.temporals[machine.currentStep].before
-		if(!machine.inRuleSince) {
-			machine.inRuleSince = fi
-		}
-		data.automata.push({
-			// exposed properties to user
-			name: machine.name,
-			inRuleSince: machine.inRuleSince
+function dfaIfExpressionFromTemporal(temporal, index, last) {
+	const conditions = []
+	if(last) {
+		conditions.push({
+			expression: {
+				type: "boolean",
+				value: {text: "true"}
+			},
+			result: {
+				lookahead: false,
+				nextId: {text: "t0"}
+			}
 		})
-		if(beforeExpr && beforeExpr.checkFrame(frames[fi], data)) {
-			if (checkDebug(fi)) {
-				console.log("<", name,">", "machine has triggered 'before' at frame", fi, `(${fi +123})`)
-			}
-			machine.currentStep = 0
-			machine.first_accepted = null
-			machine.inRuleSince = fi
-		}
-		if(thenExpr.checkFrame(frames[fi], data)) {
-			if (checkDebug(fi)) {
-				console.log("<", name,">", "machine is advancing to step", machine.currentStep+1, " at frame", fi, `(${fi +123})`)
-			}
-			if (!machine.first_accepted) {
-				machine.first_accepted = fi
-			}
-			machine.currentStep += 1
-			machine.inRuleSince = fi
-			if(machine.currentStep === machine.temporals.length) {
-				if (checkDebug(fi)) {
-					console.log("and its a match")
+	} else {
+		if (temporal.before) {
+			conditions.push({
+				expression: temporal.before,
+				result: {
+					lookahead: false,
+					nextId: {text: "t0"}
 				}
-				machine.accepted_intervals.push(
-					[machine.first_accepted, fi]
-				)
-				machine.first_accepted = null
-				machine.matched_at.push(fi)
-				machine.currentStep = 0
-				data.automata.pop()
-				return true
-			}
+			})
 		}
-		data.automata.pop()
-
-		return false
+		conditions.push({
+			expression: temporal.then,
+			result: {
+				lookahead: true,
+				nextId: {text: `t${index+1}`}
+			}
+		})
 	}
-
-	return machine
+	return {conditions}
 }
+
+function dfaRuleFromTemporal(temporal, index, last, data) {
+	//TODO t1 doesnt exist?
+	return {
+		id: {text: `t${index}`},
+		isAccepting: last,
+		if_expr: dfaIfExpressionFromTemporal(temporal, index, last)
+	}
+}
+
 
 function dfaConditionFactory(cond, data) {
 	return {
@@ -437,7 +486,7 @@ function dfaRuleFactory(rule, data) {
 		else: rule.if_expr.else,
 	}
 
-	obj.feedFrame = (fi, data, frames) => {
+	obj.feedFrame = (fi, data, frames) => {		
 		const nextState = obj.conditions.find(c => 
 			c.expression.checkFrame(frames[fi], data)
 		)
@@ -505,7 +554,7 @@ function dfaFactory(dfadef, data, name) {
 			const nextState = dfa.rules[nextStateIndex]
 			if (!nextState) {
 				console.info(`State \
-${nextStateId.text} at ${nextStateId.line}:${nextStateId.col} \
+${ns.nextId.text} at ${ns.nextId.line}:${ns.nextId.col} \
 doesn't exist`)
 				return false
 			} 
@@ -556,7 +605,6 @@ doesn't exist`)
 				console.log("<", name,">", "currently at state", currentState.id.text, ", will be accepted because it leads to a match in the future")
 			}
 		}
-		// I assume its absurd to do lookahead in an accepting state
 		const accept = lookaheadAccept || currentState.isAccepting
 		if (accept) {
 			dfa.accepted_frames.push(fi)
@@ -571,7 +619,7 @@ doesn't exist`)
 function machineFromDefinition(def, data, name) {
 	switch(def.type) {
 		case "succession": {
-			return temporalAutomataFactory(
+			return dfaFromSuccession(
 				def, 
 				data,
 				name
@@ -647,6 +695,8 @@ function computeIntervals(frames) {
 }
 
 function inspectFrame(f, frames) {
+	if(!args.inspect) 
+		return 
 	const parts = args.inspect.split(",")
 	const interval = parts.map(n => parseInt(n))
 	if( interval[0] < f && f < interval[1]) {
@@ -746,11 +796,11 @@ function executeQuery(data) {
 	if (data.query.verb.type === "function") {
 		data.verbs[data.query.verb.name](
 			result, 
-			...processParameters(
-				data.query.verb.params, 
+			data.query.verb.params.map(p => parseValue(
+				p, 
 				data.game.getFrames()[0], 
 				data
-			)
+			))
 		)
 	} else {
 		data.verbs[data.query.verb.text](result)
@@ -823,20 +873,21 @@ function execute(q, path) {
 
 //future work:
 //-rewrite and move to typed lang (for web and cli)
-//-everything is nfas
+//-refactor statemachine
 //-find cool name (Anuralogist, Inspector Anura, Peppi)
 //-graphical DFA's
 //-syntax highlight
 //-better error detection and reporting
 //-better signatures to allow type hierarchy
 //-templating/preprocessing system for definitions
+//-make grammar unambiguous
 
 // TODO:
-// - "someone" literal
+// -> "someone" literal
 // - import
 // - create std
-// - aliases for subjects
 // - show ast (update)
 // - make verbs definitions with one function call
 // - allos objects as params on verbs
 // - basics verbs (record, copy)
+// - add "effects" (can read from global)

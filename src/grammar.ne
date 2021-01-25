@@ -6,6 +6,8 @@ const keywords = [
 	"matches",
 	"frames",
 	// Keywords
+	"true",
+	"false",
 	"where",
 	"from",
 	"and",
@@ -91,6 +93,7 @@ const dfaRule 		= ([t, _, id, __, ife]) => ({type: "dfa_rule", isAccepting: !!t,
 const ifExpr 		= ([_, cont, elifs, el])=> ({type: "if_expr", conditions: [cont, ...elifs], else: el})
 const ifContent 	= ([_, expr, res]) 		=> ({type: "if_content", expression: expr, result: res})
 const ifResult  	= (la) => (res) 		=> ({type: "if_result", lookahead: la, nextId: takeNth(3)(res)})
+const boolean 	 	= ([val]) 	 			=> ({type: "boolean", value: val})
 %} 
 
 @lexer lexer
@@ -165,9 +168,14 @@ expression ->
 
 term ->
 	not term _ 								{% prefix %}
+	| boolean 								{% takeFirst %}
 	| sentence								{% sentence %}
 	| function_call							{% takeFirst %}
 	| %lp _ expression _ %rp				{% removeTwo %}
+
+boolean -> 
+	%true 									{% boolean %}
+	| %false								{% boolean %}
 
 function_call ->
 	%literal %lp param_values:? %rp			{% func %}

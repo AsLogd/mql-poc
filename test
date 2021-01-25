@@ -1,4 +1,5 @@
 function time_pass(mu, q, state) #{
+	console.log("time pass")
 	const dframes = state.frame - state.inRuleSince
 	switch(mu) {
 		case "frames":
@@ -8,43 +9,46 @@ function time_pass(mu, q, state) #{
 	}
 }#
 
-function is_grounded(c) #{
+function char_is_in_state_interval(c, lb, hb, state) #{
 	const char = c.character
-	return !char.post.isAirborne
+	console.log("is in interval", char.pre.frame)
+	const lbId = state.constants.stateNames.findIndex(s => s.toLowerCase() === lb.val)
+	const hbId = state.constants.stateNames.findIndex(s => s.toLowerCase() === hb.val)
+	return lbId <= char.post.actionStateId 
+		&& char.post.actionStateId <= hbId 
 }#
 
-define c:character is grounded = 
-	is_grounded($c)
+sentence c:character is jumping = 
+	char_is_in_state_interval($c, 'JumpF', 'JumpAerialB')
 
+sentence s:number seconds pass =
+	time_pass('secs', $s)
 
-function is_jumping(c) #{
-	const char = c.character
-	return char.post.actionStateId >= 25 && char.post.actionStateId <= 28
+sentence c:character jumps =
+	not $c is jumping then $c is jumping
+
+verb log(results) #{
+	if (results.target === "matches") {
+		console.group("Found occurrences on the following files:")
+		results.matches.forEach(res => 
+			console.log(`-${res.file} at frame ${res.first_occurrence}`)
+		)
+		console.groupEnd()
+	} else {
+		console.group("Found occurrences on the following files:")
+		results.matches.forEach(res => {
+			console.group(`-${res.file} at intervals:`)
+			console.log(res.intervals.reverse().reduce((pre, curr) =>
+				curr[0] !== curr[1]
+					? `[${curr[0]} (${curr[0]+123}), ${curr[1]} (${curr[1]+123})],\t${pre}`
+					: `${curr[0]} (${curr[0]+123}),\t\t${pre}`
+			, ""))
+			console.groupEnd()
+
+		})
+		console.groupEnd()
+	}
 }#
 
-define c:character is jumping = 
-	is_jumping($c)
-
-define c:character jumps = 
-	not $c is jumping then $c is jumping before 2 ticks pass
-
-function match_is_vs(a, b) #{
-	// If the signature is found, then the characters exist in the match
-	return true
-}#
-
-define s:number seconds pass =
-	time_pass("secs", $s)
-
-define f:number ticks pass =
-	time_pass("frames", $f)
-
-define match is a:character vs b:character =
-	match_is_vs($a, $b)
-
-frames where match is "Falco" vs "Ganon"
-	then "ganon" jumps
-	then "falco" jumps before "ganon" is grounded
-
-frames where "ganon" jumps
+log frames where "ganon" jumps
 	then "ganon" jumps before 2 seconds pass

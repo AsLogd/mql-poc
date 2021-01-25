@@ -61,5 +61,15 @@ verb log(results) #{
 	}
 }#
 
-log frames where "ganon" is wavedashing 
+sentence c:character fails wavedashing =
+	start:		if "ganon" is wavedashing 			+> wd
+	wd: 		if "ganon" is wavedashing			+> wd
+				elseif "ganon" is in 'GuardOn' 		+> fail
+				else 								-> start
+	+fail: 		if not "ganon" is in 'GuardOn' 
+					and not "ganon" is in 'GuardOff' -> start
+
+
+
+log frames where someone is wavedashing
 	from matches where "Roy" plays against "ganon"

@@ -6,6 +6,8 @@ const keywords = [
 	"matches",
 	"frames",
 	// Keywords
+	"true",
+	"false",
 	"where",
 	"from",
 	"and",
@@ -43,6 +45,7 @@ let lexer = moo.compile({
 	port_val:	/p[1-4]/,
 	number_val: /[0-9]+(?:\.[0-9]+)?/,
 	literal: 	{match: /[a-zA-Z_]+/, type: moo.keywords(keywordsMap)},
+	import: 	/@import/,
 	lp:			"(",
 	rp:			")",
 	arrow:		"->",
@@ -91,6 +94,8 @@ const dfaRule 		= ([t, _, id, __, ife]) => ({type: "dfa_rule", isAccepting: !!t,
 const ifExpr 		= ([_, cont, elifs, el])=> ({type: "if_expr", conditions: [cont, ...elifs], else: el})
 const ifContent 	= ([_, expr, res]) 		=> ({type: "if_content", expression: expr, result: res})
 const ifResult  	= (la) => (res) 		=> ({type: "if_result", lookahead: la, nextId: takeNth(3)(res)})
+const boolean 	 	= ([val]) 	 			=> ({type: "boolean", value: val})
+const importExpr 	 = ([_,__,path]) 		=> ({type: "import", path})
 %} 
 
 @lexer lexer
@@ -98,9 +103,12 @@ const ifResult  	= (la) => (res) 		=> ({type: "if_result", lookahead: la, nextId
 start	-> _ statement:+					{% removeFirst %}
 statement ->	
 	  sentence_def _ 						{% takeFirst %}
+	| import _ 								{% takeFirst %}
 	| js_func _ 							{% takeFirst %}
 	| verb _ 								{% takeFirst %}
 	| query _ 								{% takeFirst %}
+
+import -> %import __ %string_val 			{% importExpr %}
 
 js_func -> js_header js_params _ js_body	{% jsFunc %}
 js_header -> %function __ %literal			{% takeNth(2) %}
@@ -165,9 +173,14 @@ expression ->
 
 term ->
 	not term _ 								{% prefix %}
+	| boolean 								{% takeFirst %}
 	| sentence								{% sentence %}
 	| function_call							{% takeFirst %}
 	| %lp _ expression _ %rp				{% removeTwo %}
+
+boolean -> 
+	%true 									{% boolean %}
+	| %false								{% boolean %}
 
 function_call ->
 	%literal %lp param_values:? %rp			{% func %}

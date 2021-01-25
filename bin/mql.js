@@ -8,6 +8,7 @@ const Log = require("../lib/Log").default
 const Data = require("./data.js")
 var ArgumentParser = require('argparse').ArgumentParser;
 const { default: SlippiGame } = require('@slippi/slippi-js');
+const https = require('https');
 
 var parser = new ArgumentParser({
   version: '0.0.1',
@@ -874,6 +875,76 @@ function evaluateVerb(f, data) {
 	data.verbs[f.name.value] = new Function(...fparams, f.body.text)
 }
 
+function evaluateImport(imp, data) {
+	let imppath = imp.path.text.slice(1, -1)
+	let p
+	if (imppath.includes("http")) {
+		p = getRequest(imppath)
+	} else {
+		if(imppath === "std") {
+			imppath = path.resolve(__dirname, "lib/std")
+		}
+		p = fs.promises.readFile(imppath, 'utf8');
+	}
+	return p.then((content) => {
+		const parsed = grammarparser.parse(content)
+		if (!parsed.ok) {
+			throw new Error(parsed.reason)
+		}
+		return loadInto(parsed.value, data)
+	})
+}
+
+function getRequest(url) {
+	return new Promise((res, rej) => {
+		https.get(url, (resp) => {
+			let data = ''
+
+			// A chunk of data has been received.
+			resp.on('data', (chunk) => {
+				data += chunk;
+			})
+
+			// The whole response has been received. Print out the result.
+			resp.on('end', () => {
+				res(data)
+			})
+
+		}).on("error", (err) => {
+			rej(err)
+			console.error("Error: " + err.message);
+		})
+	})
+}
+
+function loadInto(q, data) {
+	// Async
+	return Promise.all(
+		q.map(stmt => {
+			switch(stmt.type) {
+				case "import":
+					return evaluateImport(stmt, data)
+				default:
+					return Promise.resolve()
+			}
+		})
+	).then(() => {
+		q.forEach((stmt) => {
+			switch(stmt.type) {
+				case "js_func": 
+					evaluateFunction(stmt, data)
+					break;
+				case "verb":
+					evaluateVerb(stmt, data)
+					break;
+				case "sentence":
+					evaluateSentence(stmt, data)
+					break;
+			}
+		})
+	})
+}
+
 function execute(q, path) {
 	let data = {
 		query: null,
@@ -884,23 +955,36 @@ function execute(q, path) {
 		automata: [],
 		global: {}
 	}
-	q.forEach((stmt) => {
-		switch(stmt.type) {
-			case "query":
-				data.query = stmt
-				break;
-			case "js_func": 
-				evaluateFunction(stmt, data)
-				break;
-			case "verb":
-				evaluateVerb(stmt, data)
-				break;
-			case "sentence":
-				evaluateSentence(stmt, data)
-				break;
-		}
+	// Async
+	Promise.all(
+		q.map(stmt => {
+			switch(stmt.type) {
+				case "import":
+					return evaluateImport(stmt, data)
+				default:
+					return Promise.resolve()
+			}
+		})
+	).then(() => {
+		q.forEach((stmt) => {
+			switch(stmt.type) {
+				case "query":
+					data.query = stmt
+					break;
+				case "js_func": 
+					evaluateFunction(stmt, data)
+					break;
+				case "verb":
+					evaluateVerb(stmt, data)
+					break;
+				case "sentence":
+					evaluateSentence(stmt, data)
+					break;
+			}
+		})
+		executeQuery(data)
 	})
-	executeQuery(data)
+	
 }
 
 //future work:
@@ -912,14 +996,12 @@ function execute(q, path) {
 //-better error detection and reporting
 //-better signatures to allow type hierarchy
 //-templating/preprocessing system for definitions
+//-"someone" literal
 
 // TODO:
-// - fix lookahead: scope should be just a reference, not the frame
-// - "someone" literal
 // - import
 // - create std
-// - aliases for subjects
 // - show ast (update)
-// - make verbs definitions with one function call
+// - make verbs definitions with one function call (or add verb alias)
 // - allos objects as params on verbs
-// - basics verbs (record, copy)
+// - basic verbs (record, copy)

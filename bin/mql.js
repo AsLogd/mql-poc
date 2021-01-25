@@ -166,6 +166,19 @@ function getPlayerFromName(name, frame, data) {
 	}
 }
 
+function getPlayerFromNameRef(name, frame, data) {
+	const metadata = data.game.getMetadata()
+	for (const key in metadata.players) {
+		if(metadata.players[key].names.netplay === name
+		|| metadata.players[key].names.code === name) {
+			return {
+				type:"player",
+				name
+			}
+		}
+	}
+}
+
 function getAttack(name) {
 	const id = attackIdFromName(name)
 	return id && {
@@ -185,11 +198,11 @@ function getPlayer(id, frame, data) {
 
 // Gets the pre and post of a character the characters called <name>
 // NOTE: this only gets the first matched character, this doesn't work for dittos
-function getCharacter(name, frame, data) {
+function getCharacter(id, frame, data) {
 	//console.log("get", name, " with id ", characterIdFromName(name))
 	//console.log("available ids", frame.players.map(p => p.post.internalCharacterId))
 	const character = frame.players.find(p => 
-		p.post.internalCharacterId === characterIdFromName(name)
+		p.post.internalCharacterId === id
 	) 
 	return character && {
 		type:"character",
@@ -197,7 +210,28 @@ function getCharacter(name, frame, data) {
 	}
 }
 
-function parseValue(value, frame, data) {
+function getPlayerRef(id, data) {
+	const metadata = data.game.getMetadata()
+	if(!metadata.players[id]) {
+		return false
+	}
+	return {
+		type:"player",
+		id
+	}	
+}
+function getCharacterRef(name) {
+	const id = characterIdFromName(name)
+	if(!id) {
+		return false
+	}
+	return {
+		type:"character",
+		id
+	}
+}
+
+function parseValue(value, data) {
 
 	switch(value.type) {
 		case "someone":
@@ -206,9 +240,9 @@ function parseValue(value, frame, data) {
 			return data.settings
 		case "obj_val": {
 			const content = value.text.slice(1, -1).toLowerCase()
-			const val = getCharacter(content, frame, data) 
+			const val = getCharacterRef(content) 
 				|| getAttack(content)
-				|| getPlayerFromName(content, frame, data)
+				|| getPlayerFromNameRef(content)
 				|| {type: "unknown", val: content}
 			if (args.debug && val.type === "unknown") {
 				console.warn("Couldn't find object ", content)
@@ -223,12 +257,12 @@ function parseValue(value, frame, data) {
 			return {type:"number", val: Number.parseFloat(value.text)}
 		case "port_val": {
 			const portNumber = parseInt(value.value.slice(1))
-			const val = getPlayer(portNumber-1, frame, data)
+			const val = getPlayerRef(portNumber-1, data)
 			if (!val) {
 				console.error("No player at port: ", value.text)
 				return "error"
 			}
-			return {type:"port", portNumber, player: val}
+			return {type:"port", portNumber}
 		}
 		case "ref": {
 			if(data.scope.length === 0) {
@@ -248,9 +282,43 @@ function parseValue(value, frame, data) {
 	}
 }
 
-function processParameters(params, frame, data) {
+function resolveValue(value, frame, data) {
+
+	switch(value.type) {
+		case "character": {
+			return getCharacter(value.id,frame, data)
+		}
+		case "player": {
+			return getPlayerFromName(value.name, frame, data)
+		}
+		case "port_val": {
+			const portNumber = parseInt(value.value.slice(1))
+			const val = getPlayer(portNumber-1, frame, data)
+			if (!val) {
+				console.error("No player at port: ", value.text)
+				return "error"
+			}
+			return {type:"port", portNumber, player: val}
+		}
+		case "ref": {
+			console.error("trying to resolve a ref")
+			return "error"
+		}
+		default: {
+			return value
+		}
+	}
+}
+
+function resolveValues(values, frame, data) {
+	return values 
+		? values.map(v => resolveValue(v,frame, data))
+		: []
+}
+
+function processParameters(params, data) {
 	return params 
-		? params.map(p => parseValue(p, frame, data))
+		? params.map(p => parseValue(p, data))
 		: []
 }
 
@@ -285,8 +353,21 @@ function checkExpressionForFrame(expr, frame, data) {
 		case "function":{
 			if(data.functions[expr.name.value]) {
 				const automata = data.automata[data.automata.length - 1]
+				const processed = processParameters(expr.params, data)
+				const values = resolveValues(
+					processed, 
+					frame, 
+					data
+				)
+				const unresolved = values.findIndex(v => !v)
+				if (unresolved >= 0) {
+					if(args.debug) {
+						console.info("Couldn't resolve value", processed[unresolved], "in the current file")
+					}
+					return false
+				}
 				return !!data.functions[expr.name.value](
-					...processParameters(expr.params, frame, data),
+					...values,
 					{
 						game: data.game, 
 						frame, 
@@ -314,7 +395,7 @@ function checkExpressionForFrame(expr, frame, data) {
 				if (word.type === "literal") {
 					signature.push(word.text)
 				} else {
-					const val = parseValue(word, frame, data)
+					const val = parseValue(word, data)
 					if (val.type === "unknown") {
 						return false
 					}
@@ -647,6 +728,8 @@ function computeIntervals(frames) {
 }
 
 function inspectFrame(f, frames) {
+	if(!args.inspect)
+		return
 	const parts = args.inspect.split(",")
 	const interval = parts.map(n => parseInt(n))
 	if( interval[0] < f && f < interval[1]) {
@@ -748,7 +831,6 @@ function executeQuery(data) {
 			result, 
 			...processParameters(
 				data.query.verb.params, 
-				data.game.getFrames()[0], 
 				data
 			)
 		)
@@ -832,6 +914,7 @@ function execute(q, path) {
 //-templating/preprocessing system for definitions
 
 // TODO:
+// - fix lookahead: scope should be just a reference, not the frame
 // - "someone" literal
 // - import
 // - create std

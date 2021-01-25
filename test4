@@ -13,7 +13,7 @@ function char_is_in_state(c, name, state) #{
 }#
 
 function char_plays(c) #{
-	return true
+	return !!c
 }#
 
 sentence c:character is jumping = 
@@ -26,13 +26,13 @@ sentence c:character is in state:string =
 	char_is_in_state($c, $state)
 
 sentence c:character is wavedashing =
-	start: 		if "ganon" is in 'KneeBend'					+> jmp
-	jmp: 		if "ganon" is in 'LandingFallSpecial'		+> wd
-				elseif "ganon" is jumping 					
-					or "ganon" is dodging 					
-					or "ganon" is in 'KneeBend'				+> jmp
-				else 				 						-> start
-	+wd:		if not "ganon" is in 'LandingFallSpecial'	-> start
+	start: 		if $c is in 'KneeBend'					+> jmp
+	jmp: 		if $c is in 'LandingFallSpecial'		+> wd
+				elseif $c is jumping 					
+					or $c is dodging 					
+					or $c is in 'KneeBend'				+> jmp
+				else 				 					-> start
+	+wd:		if not $c is in 'LandingFallSpecial'	-> start
 
 
 sentence a:character plays against b:character =

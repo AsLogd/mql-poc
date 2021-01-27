@@ -16,6 +16,19 @@ function char_plays(c) #{
 	return !!c
 }#
 
+function time_pass(mu, q, state) #{
+	const dframes = state.frame - state.inRuleSince
+	switch(mu) {
+		case "frames":
+			return dframes > q
+		case "secs":
+			return dframes/60 > q
+	}
+}#
+
+sentence t:number ticks pass = 
+	time_pass("frames", $t)
+
 sentence c:character is jumping = 
 	char_is_in_state_interval($c, 'JumpF', 'JumpAerialB')
 

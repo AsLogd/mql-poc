@@ -167,7 +167,7 @@ function getPlayerFromName(name, frame, data) {
 	}
 }
 
-function getPlayerFromNameRef(name, frame, data) {
+function getPlayerFromNameRef(name, data) {
 	const metadata = data.game.getMetadata()
 	for (const key in metadata.players) {
 		if(metadata.players[key].names.netplay === name
@@ -228,6 +228,7 @@ function getCharacterRef(name) {
 	}
 	return {
 		type:"character",
+		name,
 		id
 	}
 }
@@ -243,7 +244,7 @@ function parseValue(value, data) {
 			const content = value.text.slice(1, -1).toLowerCase()
 			const val = getCharacterRef(content) 
 				|| getAttack(content)
-				|| getPlayerFromNameRef(content)
+				|| getPlayerFromNameRef(content, data)
 				|| {type: "unknown", val: content}
 			if (args.debug && val.type === "unknown") {
 				console.warn("Couldn't find object ", content)
@@ -374,6 +375,7 @@ function checkExpressionForFrame(expr, frame, data) {
 						frame, 
 						automata, 
 						constants: Data,
+						// TODO: should this depend on context? (i.e. automata), on frame num?
 						global: {
 							setValue: (name, value) => {
 								data.global[name] = value
@@ -391,20 +393,24 @@ function checkExpressionForFrame(expr, frame, data) {
 		}
 		case "sentence": {
 			const signature = []
+			const instance = []
 			const params = []
 			for (const word of expr.val) {
 				if (word.type === "literal") {
 					signature.push(word.text)
+					instance.push(word.text)
 				} else {
 					const val = parseValue(word, data)
 					if (val.type === "unknown") {
 						return false
 					}
+					instance.push(word.text || val.id)
 					signature.push(val.type || val)
 					params.push(val)
 				}
 			}
 			const jsig = signature.join("_")
+			const isig = instance.join("_")
 			const definition = data.sentences[jsig]
 			//console.log("defs",data.definitions)
 			//console.log("searching signature", signature.join("_"))
@@ -412,12 +418,15 @@ function checkExpressionForFrame(expr, frame, data) {
 			if (!definition) {
 				throw new Error(`Definition not found for signature "${jsig}"`)
 			}
+			if (!definition.instances[isig]) {
+				definition.instances[isig] = machineFromDefinition(definition.machineDefinition, data, isig)
+			}
 			const scope = scopeFromParams(
 				definition.parameters,
 				params
 			)
 			data.scope.push(scope)
-			const res = definition.machine.feedFrame(frame.frame, data, data.game.getFrames())
+			const res = definition.instances[isig].feedFrame(frame.frame, data, data.game.getFrames())
 			data.scope.pop()
 			return res
 		}
@@ -579,6 +588,7 @@ function dfaFactory(dfadef, data, name) {
 			inRuleSince: dfa.inRuleSince,
 			currentRule: currentState.id
 		})
+		const prevla = currentState.lookahead
 		const ns = currentState.feedFrame(fi, data, frames)
 		data.automata.pop()
 		let lookaheadAccept = null
@@ -592,12 +602,13 @@ doesn't exist`)
 				return false
 			} 
 			if (checkDebug(fi)) {
-				console.log("<", name,">", "currently at state",currentState.id.text," moves to state", nextState.id.text, "at frame", fi, `(${fi +123})`)
+				const la = dfa.lookingAhead ? "\u2551" : ""
+				console.log(la, "<", name,">", "currently at state",currentState.id.text," moves to state", nextState.id.text, "at frame", fi, `(${fi +123})`)
 			}
 			if(!dfa.lookingAhead && !nextState.isAccepting){
 				if (ns.lookahead) {
 					if (checkDebug(fi)) {
-						console.log("<", name,">", "is performing a lookahead search at frame", fi, `(${fi +123})`, "=======")
+						console.log("\u2554"," <", name,">", "is performing a lookahead search at frame", fi, `(${fi +123}) `, "======")
 					}
 					dfa.lastLookaheadValue = true
 					const ladfa = dfa.clone()
@@ -611,7 +622,7 @@ doesn't exist`)
 						i += 1;
 					}
 					if (checkDebug(fi)) {
-						console.log("<", name,">", " the lookahead finished (",lookaheadAccept,"). Resuming at frame ", fi, `(${fi +123})`, "-------")
+						console.log("\u255A <", name,">", " the lookahead finished (",lookaheadAccept,"). Resuming at frame ", fi, `(${fi +123})`, "======")
 					}
 					// infer result for frames
 					for (let j = fi+1; j < i-1; j++) {
@@ -632,7 +643,8 @@ doesn't exist`)
 		currentState = dfa.rules[dfa.currentStateIndex]
 		if (checkDebug(fi)) {
 			if (currentState.isAccepting) {
-				console.log("<", name,">", "is in an accepting state", currentState.id.text, "at frame",fi,`(${fi +123})`)
+				const la = dfa.lookingAhead ? "\u2551" : ""
+				console.log(la, "<", name,">", "is in an accepting state", currentState.id.text, "at frame",fi,`(${fi +123})`)
 			}
 			if (lookaheadAccept) {
 				console.log("<", name,">", "currently at state", currentState.id.text, ", will be accepted because it leads to a match in the future")
@@ -840,6 +852,7 @@ function executeQuery(data) {
 	}
 }
 
+
 function evaluateSentence(definition, data) {
 	const parameters = []
 	const signature = definition.signature.reduce((pre, curr) => {
@@ -859,7 +872,8 @@ function evaluateSentence(definition, data) {
 		}
 	},"").slice(1)
 	data.sentences[signature] = {
-		machine: machineFromDefinition(definition.body, data, signature),
+		machineDefinition: definition.body,
+		instances: {},
 		parameters,
 	}
 
@@ -955,7 +969,6 @@ function execute(q, path) {
 		automata: [],
 		global: {}
 	}
-	// Async
 	Promise.all(
 		q.map(stmt => {
 			switch(stmt.type) {
@@ -991,17 +1004,22 @@ function execute(q, path) {
 //-rewrite and move to typed lang (for web and cli)
 //-everything is nfas
 //-find cool name (Anuralogist, Inspector Anura, Peppi)
-//-graphical DFA's
+//-graphical graphs
 //-syntax highlight
 //-better error detection and reporting
 //-better signatures to allow type hierarchy
 //-templating/preprocessing system for definitions
 //-"someone" literal
+//-show ast
+//-formalization
 
 // TODO:
-// - import
-// - create std
-// - show ast (update)
+// - remove temporalmachine
+// - catchup
+// - what happens with interior machines when looking ahead? cache that?
+// - dont use machines if content is only one expression
 // - make verbs definitions with one function call (or add verb alias)
+// - verb -> action, sentence -> fact, effect (@disable-lookahead)
 // - allos objects as params on verbs
+// - create std
 // - basic verbs (record, copy)
